@@ -1,0 +1,18 @@
+{
+  "manifest": [
+    { "name": "pricing-card", "url": "/components/pricing-card.js" },
+    { "name": "nav-item", "url": "/components/nav-item.js" },
+    { "name": "footer", "url": "/components/footer.js" },
+    { "name": "header", "url": "/components/header.js" },
+    { "name": "hero", "url": "/components/hero.js" },
+    { "name": "nav-container", "url": "/components/nav-container.js" },
+    { "name": "newsletter", "url": "/components/newsletter.js" },
+    { "name": "pricing-cards", "url": "/components/pricing-cards.js" }
+  ],
+  "content": {
+    "hero": "<h1 class=\"hero-heading\">Welcome to Acme</h1><p class=\"hero-subheading\">The best products for your business</p><button class=\"hero-button\">Get Started</button>",
+    "footer": "<div class=\"footer-inner\"><span>© Acme Corp</span></div>",
+    "header": "<div class=\"header-logo\">Acme Corp</div><nav class=\"header-nav\"><a href=\"#\">Home</a><a href=\"#\">About</a><a href=\"#\">Services</a><a href=\"#\">Contact</a></nav><button class=\"header-cta\">Sign In</button>",
+    "newsletter": "<div class=\"newsletter-inner\"><h2 class=\"newsletter-heading\">Subscribe to Acme News</h2><p class=\"newsletter-subheading\">Get the best deals first</p><div class=\"newsletter-form\"><input type=\"email\" class=\"newsletter-input\" placeholder=\"Enter your email\" /><button class=\"newsletter-button\">Subscribe</button></div></div>"
+  }
+}

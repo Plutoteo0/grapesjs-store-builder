@@ -1,0 +1,18 @@
+{
+  "manifest": [
+    { "name": "pricing-card", "url": "/components/pricing-card.js" },
+    { "name": "nav-item", "url": "/components/nav-item.js" },
+    { "name": "footer", "url": "/components/footer.js" },
+    { "name": "header", "url": "/components/header.js" },
+    { "name": "hero", "url": "/components/hero.js" },
+    { "name": "nav-container", "url": "/components/nav-container.js" },
+    { "name": "newsletter", "url": "/components/newsletter.js" },
+    { "name": "pricing-cards", "url": "/components/pricing-cards.js" }
+  ],
+  "content": {
+    "hero": "<h1 class=\"hero-heading\">Welcome to Beta Store</h1><p class=\"hero-subheading\">Premium products for your team</p><button class=\"hero-button\">Get Started</button>",
+    "footer": "<div class=\"footer-inner\"><span>© Beta Inc</span></div>",
+    "header": "<div class=\"header-logo\">Beta Inc</div><nav class=\"header-nav\"><a href=\"#\">Home</a><a href=\"#\">Products</a><a href=\"#\">Contact</a></nav><button class=\"header-cta\">Sign Up</button>",
+    "newsletter": "<div class=\"newsletter-inner\"><h2 class=\"newsletter-heading\">Stay updated with Beta</h2><p class=\"newsletter-subheading\">Get the latest news and offers</p><div class=\"newsletter-form\"><input type=\"email\" class=\"newsletter-input\" placeholder=\"Enter your email\" /><button class=\"newsletter-button\">Subscribe</button></div></div>"
+  }
+}
