@@ -5,7 +5,7 @@ import grapesjs from "grapesjs";
 import myComponentsPlugin from "./plugin";
 import { getStoreConfig } from "./editor-config";
 
-const STORE_ID = "acme"; // will come from auth/routing in production
+const STORE_ID = "acme";
 
 export default function App() {
   const [modules, setModules] = useState(null);

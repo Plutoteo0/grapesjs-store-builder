@@ -1,7 +1,5 @@
 import themedBlock from "./components/themed-block";
 
-// modules — array of { name, config } loaded async by App.jsx before editor init.
-// Order in the array determines registration order — put child components first.
 export default function myComponentsPlugin(editor, opts = {}) {
   const { modules = [], ...clientOpts } = opts;
 
