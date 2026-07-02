@@ -45,6 +45,17 @@ export default function App() {
       grapesjs={grapesjs}
       onEditor={(editor) => {
         window.editor = editor;
+
+        let debounceTimer;
+        editor.on("update", () => {
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            console.log("=== Editor state ===");
+            console.log("Components:", editor.getComponents().toJSON());
+            console.log("HTML:", editor.getHtml());
+            console.log("CSS:", editor.getCss());
+          }, 500);
+        });
       }}
       options={{
         height: "100vh",
