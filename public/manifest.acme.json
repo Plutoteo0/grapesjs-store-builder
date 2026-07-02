@@ -1,0 +1,10 @@
+[
+  { "name": "pricing-card", "url": "/components/pricing-card.js" },
+  { "name": "nav-item", "url": "/components/nav-item.js" },
+  { "name": "footer", "url": "/components/footer.js" },
+  { "name": "header", "url": "/components/header.js" },
+  { "name": "hero", "url": "/components/hero.v2.js" },
+  { "name": "nav-container", "url": "/components/nav-container.js" },
+  { "name": "newsletter", "url": "/components/newsletter.js" },
+  { "name": "pricing-cards", "url": "/components/pricing-cards.js" }
+]

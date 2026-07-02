@@ -69,7 +69,11 @@ export default {
         children.add([
           { tagName: "div", classes: ["header-logo"], components: logoContent },
           { type: "nav-container" },
-          { tagName: "button", classes: ["header-cta"], components: ctaButtonText },
+          {
+            tagName: "button",
+            classes: ["header-cta"],
+            components: ctaButtonText,
+          },
         ]);
       } else {
         children.at(0).components(logoContent);

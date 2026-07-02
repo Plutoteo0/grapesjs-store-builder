@@ -17,7 +17,7 @@ export default {
       // TODO: add the rest of your fields with default values,
       // e.g. someField: "default value",
 
-      heading: "Welcome",
+      heading: "Welcome to Our Website",
       subheading: "Short Description",
       buttonText: "Get Started",
       backgroundImage: "",

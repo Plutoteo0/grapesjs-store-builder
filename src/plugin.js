@@ -1,23 +1,16 @@
 import themedBlock from "./components/themed-block";
 
-const modules = import.meta.glob("./components/*.js", { eager: true });
-
+// modules — array of { name, config } loaded async by App.jsx before editor init.
+// Order in the array determines registration order — put child components first.
 export default function myComponentsPlugin(editor, opts = {}) {
+  const { modules = [], ...clientOpts } = opts;
+
   editor.Components.addType("themed-block", themedBlock);
 
-  for (const path in modules) {
-    const fileName = path.split("/").pop().replace(".js", "");
+  for (const { name, config } of modules) {
+    const { blockInfo, ...typeConfig } = config;
 
-    if (fileName === "themed-block" || fileName === "_template") continue;
-
-    const componentConfig = modules[path].default;
-
-    const { blockInfo, ...typeConfig } = componentConfig;
-
-    // Generic per-client override: opts[componentName] = { field: value, ... }
-    // Replaces the old hardcoded `if (fileName === "footer")` block —
-    // now works for any component without touching plugin.js again.
-    const componentOpts = opts[fileName];
+    const componentOpts = clientOpts[name];
     if (componentOpts) {
       Object.keys(componentOpts).forEach((key) => {
         if (key in typeConfig.model.defaults) {
@@ -26,14 +19,14 @@ export default function myComponentsPlugin(editor, opts = {}) {
       });
     }
 
-    editor.Components.addType(fileName, typeConfig);
+    editor.Components.addType(name, typeConfig);
 
     if (blockInfo) {
-      editor.Blocks.add(`${fileName}-block`, {
+      editor.Blocks.add(`${name}-block`, {
         label: blockInfo.label,
         category: blockInfo.category || "Sections",
         attributes: { class: blockInfo.icon || "" },
-        content: { type: fileName },
+        content: { type: name },
       });
     }
   }
