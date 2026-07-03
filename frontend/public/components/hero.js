@@ -10,7 +10,7 @@ export default {
       tagName: "section",
       name: "Hero",
       theme: "light",
-      apiUrl: "http://localhost:3001/api/content/acme",
+      content: "",
 
       watchProps: ["theme"],
 
@@ -30,9 +30,8 @@ export default {
     },
 
     async init() {
-      const url = this.get("apiUrl");
-      const data = await fetch(url).then((r) => r.json());
-      if (data.hero) this.components(data.hero);
+      const html = this.get("content");
+      if (html) this.components(html);
       this.updateContent();
 
       const watchProps = this.get("watchProps") || [];

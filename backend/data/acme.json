@@ -1,18 +1,39 @@
 {
   "manifest": [
-    { "name": "pricing-card", "url": "/components/pricing-card.js" },
-    { "name": "nav-item", "url": "/components/nav-item.js" },
-    { "name": "footer", "url": "/components/footer.js" },
-    { "name": "header", "url": "/components/header.js" },
-    { "name": "hero", "url": "/components/hero.js" },
-    { "name": "nav-container", "url": "/components/nav-container.js" },
-    { "name": "newsletter", "url": "/components/newsletter.js" },
-    { "name": "pricing-cards", "url": "/components/pricing-cards.js" }
+    {
+      "name": "footer",
+      "url": "/components/footer.js",
+      "cssUrl": "/styles/acme/footer.1.0.0.css"
+    },
+    {
+      "name": "header",
+      "url": "/components/header.js",
+      "cssUrl": "/styles/acme/header.1.0.0.css"
+    },
+    {
+      "name": "hero",
+      "url": "/components/hero.js",
+      "cssUrl": "/styles/acme/hero.1.0.0.css"
+    },
+    {
+      "name": "newsletter",
+      "url": "/components/newsletter.js",
+      "cssUrl": "/styles/acme/newsletter.1.0.0.css"
+    },
+    {
+      "name": "pricing-cards",
+      "url": "/components/pricing-cards.js",
+      "cssUrl": "/styles/acme/pricing-cards.1.0.0.css"
+    }
   ],
   "content": {
     "hero": "<h1 class=\"hero-heading\">Welcome to Acme</h1><p class=\"hero-subheading\">The best products for your business</p><button class=\"hero-button\">Get Started</button>",
     "footer": "<div class=\"footer-inner\"><span>© Acme Corp</span></div>",
+
     "header": "<div class=\"header-logo\">Acme Corp</div><nav class=\"header-nav\"><a href=\"#\">Home</a><a href=\"#\">About</a><a href=\"#\">Services</a><a href=\"#\">Contact</a></nav><button class=\"header-cta\">Sign In</button>",
-    "newsletter": "<div class=\"newsletter-inner\"><h2 class=\"newsletter-heading\">Subscribe to Acme News</h2><p class=\"newsletter-subheading\">Get the best deals first</p><div class=\"newsletter-form\"><input type=\"email\" class=\"newsletter-input\" placeholder=\"Enter your email\" /><button class=\"newsletter-button\">Subscribe</button></div></div>"
+
+    "newsletter": "<div class=\"newsletter-inner\"><h2 class=\"newsletter-heading\">Subscribe to Acme News</h2><p class=\"newsletter-subheading\">Get the best deals first</p><div class=\"newsletter-form\"><input type=\"email\" class=\"newsletter-input\" placeholder=\"Enter your email\" /><button class=\"newsletter-button\">Subscribe</button></div></div>",
+
+    "pricing-cards": "<div class=\"pricing-cards-inner\"><div class=\"pricing-card\"><img src=\"https://picsum.photos/seed/starter/280/160\" alt=\"Starter\" class=\"pricing-card-image\" /><h3 class=\"pricing-card-title\">Starter</h3><p class=\"pricing-card-price\">$19/mo</p><p class=\"pricing-card-desc\">Perfect for individuals just getting started.</p><button class=\"pricing-card-button\">Choose Plan</button></div><div class=\"pricing-card\"><img src=\"https://picsum.photos/seed/pro/280/160\" alt=\"Pro\" class=\"pricing-card-image\" /><h3 class=\"pricing-card-title\">Pro</h3><p class=\"pricing-card-price\">$49/mo</p><p class=\"pricing-card-desc\">For growing teams that need more power.</p><button class=\"pricing-card-button\">Choose Plan</button></div><div class=\"pricing-card\"><img src=\"https://picsum.photos/seed/enterprise/280/160\" alt=\"Enterprise\" class=\"pricing-card-image\" /><h3 class=\"pricing-card-title\">Enterprise</h3><p class=\"pricing-card-price\">$99/mo</p><p class=\"pricing-card-desc\">Advanced features for large organizations.</p><button class=\"pricing-card-button\">Choose Plan</button></div></div>"
   }
 }

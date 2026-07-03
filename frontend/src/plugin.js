@@ -1,16 +1,15 @@
 import themedBlock from "./components/themed-block";
 
 export default function myComponentsPlugin(editor, opts = {}) {
-  const { modules = [], apiUrl, ...clientOpts } = opts;
+  const { modules = [], content, ...clientOpts } = opts;
 
   editor.Components.addType("themed-block", themedBlock);
 
   for (const { name, config } of modules) {
     const { blockInfo, ...typeConfig } = config;
 
-    // Inject the correct apiUrl for this store into any component that uses it
-    if (apiUrl && "apiUrl" in typeConfig.model.defaults) {
-      typeConfig.model.defaults.apiUrl = apiUrl;
+    if (content?.[name]) {
+      typeConfig.model.defaults.content = content[name];
     }
 
     const componentOpts = clientOpts[name];

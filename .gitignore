@@ -17,6 +17,9 @@ dist-ssr
 .env.local
 .env.*.local
 
+# Auto-generated editor save state
+backend/data/*.save.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

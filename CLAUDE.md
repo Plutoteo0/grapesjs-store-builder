@@ -13,174 +13,192 @@ reusable solutions over one-off hardcoded fixes.
 
 ## Stack
 
-- Vite + React
+- Vite + React (`frontend/`)
 - `grapesjs` 0.23.2 + `@grapesjs/react` 2.0.0
-- Node.js/Express backend planned (not yet built) for per-client manifest API
+- Node.js + Express (`backend/`) — running, serves manifest, content, save/load
 
 ---
 
-## Current architecture (as of this file)
-
-### Component system
-- **`src/components/themed-block.js`** — base type. All themed components
-  `extend: "themed-block"`. Handles the shared re-render subscription via
-  `watchProps` (explicit list of own props that should trigger
-  `updateContent()`).
-- **Why `watchProps` exists:** early version used `this.on('change', ...)`
-  without filtering — this fired on *any* model change, including
-  GrapesJS-internal fields (selection state), which broke double-click
-  text editing. `watchProps` scopes the listener to only the fields the
-  component actually declares.
-- **`src/plugin.js`** — single assembly point. Auto-registers every
-  component under `src/components/*.js` via `import.meta.glob({ eager: true })`
-  (compile-time, not dynamic — see "Planned: dynamic component loading"
-  below for why this is changing).
-- **Per-client override (current, generic):**
-  ```js
-  const componentOpts = opts[fileName];
-  if (componentOpts) {
-    Object.keys(componentOpts).forEach((key) => {
-      if (key in typeConfig.model.defaults) {
-        typeConfig.model.defaults[key] = componentOpts[key];
-      }
-    });
-  }
-  ```
-  This replaced an old hardcoded `if (fileName === "footer") {...}` block
-  that only worked for one component and two fields. Now any component can
-  have per-client defaults just by adding a matching section to the config
-  JSON — no `plugin.js` changes needed.
-- **`src/editor-config.js` + `src/configs/*.json`** — per-client config
-  layer. `getStoreConfig(storeId)` returns JSON passed as `pluginsOpts`.
-  Config format is now **namespaced by component name**:
-  ```json
-  { "footer": { "theme": "dark", "companyName": "Acme Corp" } }
-  ```
-  (Not the old flat `{ "defaultTheme": ..., "defaultCompanyName": ... }`.)
-
-### Components (5, all themed-block based)
-- Footer — light/dark/social themes
-- Header — light/dark/transparent
-- Hero — light/dark/image (background image + alpha overlay color)
-- Pricing Cards — **flat HTML-string implementation, refactor pending**
-  (see below)
-- Newsletter — light/dark
-
-### Known GrapesJS gotchas (learned the hard way)
-- Traits need `changeProp: 1` to write to the model property instead of
-  the HTML attribute — otherwise `updateContent()` never sees the new value.
-- `editor.Components.addType()` must be called *after* `opts` overrides are
-  applied to `defaults`, not before — GrapesJS mutates the defaults object
-  on registration.
-- `storageManager` was `false` initially (nothing persisted). Now set to
-  `{ type: "local", autosave: true }` so the component tree survives
-  reloads and can be inspected via `editor.getComponents().toJSON()`.
-
----
-
-## In progress: Pricing Cards container/child split
-
-**Problem:** `pricing-cards.js` currently regenerates all cards from a
-hardcoded HTML template string on every `cardCount` change. This means any
-inline edits to a specific card (title, price, description) are destroyed
-the moment `cardCount` changes, because the whole block gets rebuilt from
-scratch with placeholder text.
-
-**Plan:** split into two component types:
-- **`pricing-container`** — layout/count/shared theme. Manages children
-  programmatically via `this.components().add({ type: "pricing-card" })`
-  and `.remove()` instead of string regeneration.
-- **`pricing-card`** — independent child component, own `defaults`
-  (title, price, description, buttonText, image) and own `traits`.
-  `draggable: ".pricing-container"` so it can't be dropped standalone.
-  No `blockInfo` — not draggable from the blocks panel directly, only
-  created by the container.
-
-Status: **not yet implemented** — a draft of `pricing-card.js` was sketched
-but not committed. Next actual step in this thread of work.
-
-Same container/child pattern is planned afterward for:
-- Header nav items → `nav-container` + `nav-item`
-- Footer social links → `social-container` + `social-link`
-
----
-
-## Planned: dynamic per-client component loading (not yet started)
-
-**Business need:** each client should be able to get a bugfix or a new
-custom component without a full app rebuild/redeploy affecting every other
-client.
-
-**Why the current setup can't do this:** `import.meta.glob` resolves at
-Vite **build time** — every component file is baked into the bundle. There's
-no way to add/update a component for one client without rebuilding and
-redeploying the whole app for everyone.
-
-**Target architecture:**
-1. **Component build pipeline** — each component built as its own
-   standalone ES module (not bundled into the main App.jsx build).
-2. **CDN/storage** — versioned, immutable paths, e.g.
-   `/components/hero/1.2.0/hero.js`, `/components/hero/1.2.1/hero.js`.
-   Immutable versioned URLs → can be cached indefinitely, no invalidation
-   needed. Rollback = point the manifest at an older version.
-3. **Backend: per-client manifest** — DB table roughly
-   `store_components(store_id, component_name, version, url)`. Updating
-   one client's `hero` version doesn't touch any other client's manifest.
-4. **`App.jsx`** — becomes async: fetch the manifest + store config before
-   rendering `<GjsEditor>`.
-5. **`plugin.js`** — biggest change. Replace `import.meta.glob` with a loop
-   over the manifest that does `await import(url)` per component, then
-   `editor.Components.addType(name, module.default)`. The generic
-   `opts[fileName]` override logic does **not** need to change — it doesn't
-   care whether the component came from a local file or a remote URL.
-
-**Security note:** dynamically `import()`-ing remote JS is safe here only
-because the source is our own CI/CD pipeline (we build and publish every
-component ourselves) — not arbitrary third-party or user-supplied code.
-
-**Suggested first step (proof of concept):** rewrite `plugin.js` to load
-from a hardcoded array of URLs via `await import(url)`, without a real
-backend/CDN yet — validates the dynamic-loading mechanic in GrapesJS before
-building the full pipeline (build system, CDN, manifest API).
-
-Status: **architecture only, nothing implemented yet.**
-
----
-
-## Broader project context (for reference, not urgent)
-
-- This PoC is one building block of a larger long-term idea: a
-  Shopify/Webflow-style multi-tenant store builder, built solo. Full scope
-  includes multi-tenancy, product catalog, checkout, admin panel, storefront
-  rendering — none of that exists yet. The GrapesJS work here is the
-  page-builder module of that eventual system.
-- Open architectural question not yet resolved: whether the page tree is
-  stored as GrapesJS's own HTML/CSS export, or as an abstract JSON tree
-  (`{ type, props, styles, children }`) rendered by a separate component
-  registry on the storefront (decouples storefront rendering from GrapesJS).
-  Leaning toward the abstract JSON tree.
-
----
-
-## File map
+## Repo structure (monorepo)
 
 ```
-src/
-  App.jsx              # GjsEditor setup, storageManager, pluginsOpts
-  main.jsx
-  editor-config.js      # getStoreConfig(storeId)
-  plugin.js              # component auto-registration + per-client override
-  components/
-    themed-block.js      # base type
-    _template.js          # boilerplate for new components
-    footer.js
-    header.js
-    hero.js
-    newsletter.js
-    pricing-cards.js      # flat implementation — refactor pending
-  configs/
-    acme.json
-    beta.json
-public/
-  components.css
+grapesjs-components-poc/
+  frontend/
+    src/
+      App.jsx              # async manifest fetch, save/restore, GjsEditor
+      plugin.js            # registers pre-loaded modules + apiUrl injection
+      components/
+        themed-block.js    # base type (still bundled, always needed)
+        _template.js
+        footer.js          # fetches HTML from API on init
+        header.js          # fetches HTML from API on init
+        hero.js            # fetches HTML from API on init
+        newsletter.js      # fetches HTML from API on init
+        pricing-cards.js   # container — manages pricing-card children
+        pricing-card.js    # child — own traits, draggable only inside container
+        nav-container.js   # child container for nav items (inside header)
+        nav-item.js        # child — label + url traits
+    public/
+      components/          # deployed component files (served as static assets)
+      styles/              # per-client CSS overrides (planned, not yet wired)
+      components.css       # base styles for all clients
+  backend/
+    server.js              # Express API
+    data/
+      acme.json            # manifest + HTML content for Acme
+      beta.json            # manifest + HTML content for Beta
+      acme.save.json       # saved editor state for Acme (auto-generated)
 ```
+
+---
+
+## Current architecture
+
+### Dynamic component loading
+
+Components are no longer bundled into the app. Flow on page load:
+
+1. `App.jsx` reads `?store=acme` from query param (will be JWT in production)
+2. `GET /api/manifest/acme` → array of `{ name, url }` from `backend/data/acme.json`
+3. For each entry: `fetch(url)` → Blob → `import(blobUrl)` (Blob workaround needed
+   because Vite blocks `import()` from `public/` in dev mode; not needed in production)
+4. Pre-loaded modules passed to `plugin.js` via `pluginsOpts`
+5. `plugin.js` registers each module — order in manifest determines registration order
+   (child components must come before their containers)
+
+### Content loading (server-rendered HTML)
+
+Components no longer generate HTML from traits. Instead:
+
+- Each component has `apiUrl` in its `defaults`
+- `plugin.js` injects the correct `apiUrl` for the current store before registration
+- Component's `init()` fetches `GET /api/content/acme`, takes its slice (`data.hero`),
+  and calls `this.components(html)`
+- `updateContent()` only handles theme class — never touches content
+
+Why: server knows the client's real data (products, company name, etc.). Component
+just renders what it receives. Content changes = update the DB, no code change needed.
+
+### Save / restore editor state
+
+- On every editor change (debounced 1s): `POST /api/save/acme` with
+  `{ components, html, css }` from `editor.getComponents().toJSON()`,
+  `editor.getHtml()`, `editor.getCss()`
+- On editor init: `GET /api/load/acme` — if saved state exists, restore via
+  `editor.setComponents()` + `editor.setStyle()`
+- Saved to `backend/data/acme.save.json` (will be `store_pages` table in production)
+
+### plugin.js
+
+Accepts pre-loaded modules, no longer uses `import.meta.glob`:
+
+```js
+const { modules = [], apiUrl, ...clientOpts } = opts;
+// modules   → array of { name, config } — register in order
+// apiUrl    → injected into each component's defaults.apiUrl
+// clientOpts → per-component default overrides (currently unused, storeConfig removed)
+```
+
+### Backend API
+
+```
+GET  /api/manifest/:storeId  → manifest array from data/*.json
+GET  /api/content/:storeId   → HTML content map { hero: "<h1>...", footer: "..." }
+GET  /api/load/:storeId      → saved editor state (404 if none)
+POST /api/save/:storeId      → saves { components, html, css } to *.save.json
+```
+
+---
+
+## Component patterns
+
+### Themed components (hero, footer, header, newsletter)
+
+```js
+defaults: {
+  tagName: "section",
+  theme: "light",
+  apiUrl: "http://localhost:3001/api/content/acme", // overridden by plugin.js
+  watchProps: ["theme"], // only theme triggers updateContent
+  traits: [/* only theme select */],
+},
+
+async init() {
+  const data = await fetch(this.get("apiUrl")).then(r => r.json());
+  if (data.hero) this.components(data.hero); // insert server HTML
+  this.updateContent();
+  // manually wire watchProps (themed-block's init() is overridden)
+  const events = this.get("watchProps").map(p => `change:${p}`).join(" ");
+  this.on(events, this.updateContent);
+},
+
+updateContent() {
+  const theme = this.get("theme");
+  this.removeClass(["hero-light", "hero-dark"]);
+  this.addClass(`hero-${theme}`);
+  // NO this.components() call — content comes from server
+},
+```
+
+### Container/child components (pricing-cards + pricing-card)
+
+`pricing-cards` manages children via `this.components().add/remove` instead of
+HTML string regeneration — preserves inline edits when card count changes.
+
+`pricing-card` has its own traits (title, price, description, image, buttonText).
+`draggable: ".pricing-cards"` prevents dropping outside the container.
+
+### nav-container + nav-item (inside header)
+
+Same container/child pattern. Header fetches its full HTML from server — nav items
+are part of that HTML, not managed as GrapesJS child components anymore.
+`nav-container` and `nav-item` remain registered but are not used by header
+in the current server-HTML approach.
+
+---
+
+## Known GrapesJS gotchas
+
+- Traits need `changeProp: 1` — otherwise `updateContent()` never sees the new value.
+- `editor.Components.addType()` must be called after `opts` overrides are applied.
+- `themed-block.init()` is overridden when a component defines its own `init()` —
+  must manually wire `watchProps` listeners and call `updateContent()`.
+- Dynamic `import()` from `public/` is blocked by Vite in dev — use fetch + Blob URL.
+- Child components must be registered before their parent containers.
+
+---
+
+## Production architecture (planned, not built)
+
+```
+JWT token → storeId (never from query param in production)
+  ↓
+GET /api/manifest  → [{ name, url: "cdn.com/hero/1.0.1/hero.js", css: "cdn.com/..." }]
+GET /api/content   → { hero: "<h1>...</h1>", ... }
+GET /api/load      → saved editor state (from store_pages DB table)
+  ↓
+Components fetched from CDN, CSS loaded in canvas
+  ↓
+POST /api/save → store_pages table
+```
+
+Per-client component update flow:
+- Fix bug in `hero.js` → build → upload to CDN as `hero/1.0.2/hero.js`
+- `UPDATE store_components SET version='1.0.2' WHERE store_id='acme' AND name='hero'`
+- Client hits F5 → gets fix. Other clients unaffected.
+
+DB tables (planned):
+- `stores` — store registry
+- `store_components` — per-client manifest (name, version, url, css)
+- `store_content` — HTML content per component per store
+- `store_pages` — saved editor state (components_json, css, html)
+
+---
+
+## Broader project context
+
+- Shopify/Webflow-style multi-tenant store builder. GrapesJS PoC is the
+  page-builder module. Product catalog, checkout, admin panel not yet started.
+- Storage format decision: currently saving GrapesJS component JSON tree +
+  HTML + CSS. Abstract JSON tree approach (`{ type, props, children }`) still
+  an option for decoupling storefront rendering from GrapesJS — not resolved.

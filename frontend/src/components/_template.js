@@ -1,6 +1,12 @@
-// TEMPLATE: copy this file under a new name (e.g. testimonial.js)
-// and fill in the TODOs with your own logic.
-// See README.md → "How to add a new component" for the full checklist.
+// TEMPLATE: copy this file under a new name (e.g. testimonial.js) into
+// frontend/public/components/, add a manifest entry pointing to it, and
+// fill in the TODOs with your own logic.
+//
+// Content comes from the server, not from this file: the manifest entry's
+// name must have a matching key in the store's `content` object
+// (backend/data/<store>.json), which App.jsx fetches once and plugin.js
+// injects into defaults.content. This component only renders what it's
+// given — it never builds its own HTML.
 
 export default {
   extend: "themed-block", // do not change — always the same for themed components
@@ -17,6 +23,7 @@ export default {
       name: "TODO Component Name", // shown in the editor (Layer Manager)
 
       theme: "light", // TODO: default theme value
+      content: "", // filled in by plugin.js from the store's content API — do not set manually
       // TODO: add the rest of your fields with default values,
       // e.g. someField: "default value",
 
@@ -41,21 +48,24 @@ export default {
       ],
     },
 
+    async init() {
+      const html = this.get("content");
+      if (html) this.components(html); // insert server-provided HTML once
+      this.updateContent();
+
+      const watchProps = this.get("watchProps") || [];
+      const events = watchProps.map((p) => `change:${p}`).join(" ");
+      if (events) this.on(events, this.updateContent);
+    },
+
     updateContent() {
       const theme = this.get("theme");
       // TODO: read the rest of your fields via this.get("...")
 
+      // Only toggle classes here — never touch content. Content is
+      // inserted once in init() and lives on as normal child components.
       this.removeClass(["TODO-light", "TODO-dark"]); // TODO: list all theme classes
       this.addClass(`TODO-${theme}`); // TODO: replace prefix with your component name
-
-      let content = "";
-      if (theme === "dark") {
-        content = `<div>TODO: HTML for dark theme</div>`;
-      } else {
-        content = `<div>TODO: HTML for light theme (default)</div>`;
-      }
-
-      this.components(content);
     },
   },
 };

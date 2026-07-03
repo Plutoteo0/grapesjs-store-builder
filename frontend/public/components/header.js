@@ -11,7 +11,7 @@ export default {
       tagName: "header",
       name: "Header",
       theme: "light",
-      apiUrl: "http://localhost:3001/api/content/acme",
+      content: "",
 
       watchProps: ["theme"],
 
@@ -31,9 +31,8 @@ export default {
     },
 
     async init() {
-      const url = this.get("apiUrl");
-      const data = await fetch(url).then((r) => r.json());
-      if (data.header) this.components(data.header);
+      const html = this.get("content");
+      if (html) this.components(html);
       this.updateContent();
 
       const watchProps = this.get("watchProps") || [];

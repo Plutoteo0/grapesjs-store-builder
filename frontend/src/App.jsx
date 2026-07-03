@@ -4,11 +4,14 @@ import GjsEditor from "@grapesjs/react";
 import grapesjs from "grapesjs";
 import myComponentsPlugin from "./plugin";
 
-const STORE_ID = new URLSearchParams(window.location.search).get("store") || "acme";
+const STORE_ID =
+  new URLSearchParams(window.location.search).get("store") || "acme";
 const API_BASE = "http://localhost:3001";
 
 export default function App() {
   const [modules, setModules] = useState(null);
+  const [cssUrls, setCssUrls] = useState([]);
+  const [content, setContent] = useState(null);
 
   useEffect(() => {
     async function importFromUrl(url) {
@@ -24,14 +27,20 @@ export default function App() {
     }
 
     async function loadComponents() {
-      const manifest = await fetch(`${API_BASE}/api/manifest/${STORE_ID}`).then((r) =>
-        r.json(),
+      const content = await fetch(`${API_BASE}/api/content/${STORE_ID}`).then(
+        (r) => r.json(),
+      );
+      setContent(content);
+      const manifest = await fetch(`${API_BASE}/api/manifest/${STORE_ID}`).then(
+        (r) => r.json(),
       );
       const loaded = [];
       for (const { name, url } of manifest) {
         const mod = await importFromUrl(url);
         loaded.push({ name, config: mod.default });
       }
+      const cssUrls = manifest.filter((m) => m.cssUrl).map((m) => m.cssUrl);
+      setCssUrls(cssUrls);
       setModules(loaded);
     }
     loadComponents();
@@ -76,13 +85,13 @@ export default function App() {
         height: "100vh",
         storageManager: false,
         canvas: {
-          styles: ["/components.css"],
+          styles: ["/components.css", ...cssUrls],
         },
         plugins: [myComponentsPlugin],
         pluginsOpts: {
           [myComponentsPlugin]: {
             modules,
-            apiUrl: `${API_BASE}/api/content/${STORE_ID}`,
+            content,
           },
         },
       }}
