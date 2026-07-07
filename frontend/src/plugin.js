@@ -8,8 +8,12 @@ export default function myComponentsPlugin(editor, opts = {}) {
   for (const { name, config } of modules) {
     const { blockInfo, ...typeConfig } = config;
 
-    if (content?.[name]) {
+    if (typeof content?.[name] === "string") {
       typeConfig.model.defaults.content = content[name];
+    } else if (content?.[name]){
+      const { template, ...fields } = content[name]
+      Object.assign(typeConfig.model.defaults, fields);
+      typeConfig.model.defaults.content = template
     }
 
     const componentOpts = clientOpts[name];

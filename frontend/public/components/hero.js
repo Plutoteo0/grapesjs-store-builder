@@ -10,9 +10,18 @@ export default {
       tagName: "section",
       name: "Hero",
       theme: "light",
+      buttonText: "",
       content: "",
+      editable: false,
+      script: function() {
+        const button = this.querySelector(".hero-button");
+        if (button) {
+          button.addEventListener('click', () => console.log("button clicked"));
+        }
+      },
+      "script-props": ["theme", "buttonText"],
 
-      watchProps: ["theme"],
+      watchProps: ["theme", "buttonText"],
 
       traits: [
         {
@@ -26,17 +35,13 @@ export default {
             { value: "image", name: "With Background Image" },
           ],
         },
+        {
+          type: "text",
+          name: "buttonText",
+          label: "Button text",
+          changeProp: 1,
+        }
       ],
-    },
-
-    async init() {
-      const html = this.get("content");
-      if (html) this.components(html);
-      this.updateContent();
-
-      const watchProps = this.get("watchProps") || [];
-      const events = watchProps.map((p) => `change:${p}`).join(" ");
-      if (events) this.on(events, this.updateContent);
     },
 
     updateContent() {

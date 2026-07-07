@@ -27,7 +27,10 @@
     }
   ],
   "content": {
-    "hero": "<h1 class=\"hero-heading\">Welcome to Acme</h1><p class=\"hero-subheading\">The best products for your business</p><button class=\"hero-button\">Get Started</button>",
+    "hero": {
+      "template": "<h1 class=\"hero-heading\">Welcome to Acme</h1><p class=\"hero-subheading\">The best products for your business</p><button class=\"hero-button\">{{ buttonText }}</button>",
+      "buttonText": "Get started"
+    },
     "footer": "<div class=\"footer-inner\"><span>© Acme Corp</span></div>",
 
     "header": "<div class=\"header-logo\">Acme Corp</div><nav class=\"header-nav\"><a href=\"#\">Home</a><a href=\"#\">About</a><a href=\"#\">Services</a><a href=\"#\">Contact</a></nav><button class=\"header-cta\">Sign In</button>",

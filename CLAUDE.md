@@ -68,8 +68,6 @@ Components are no longer bundled into the app. Flow on page load:
 
 ### Content loading (server-rendered HTML)
 
-Components no longer generate HTML from traits. Instead:
-
 - Each component has `apiUrl` in its `defaults`
 - `plugin.js` injects the correct `apiUrl` for the current store before registration
 - Component's `init()` fetches `GET /api/content/acme`, takes its slice (`data.hero`),
@@ -78,6 +76,65 @@ Components no longer generate HTML from traits. Instead:
 
 Why: server knows the client's real data (products, company name, etc.). Component
 just renders what it receives. Content changes = update the DB, no code change needed.
+
+### Content persistence bug + fix (template + Traits pattern)
+
+**Bug found:** every component's `init()` called `this.components(html)` unconditionally
+with the server-fetched content. `init()` runs *after* GrapesJS has already set a
+component's children from restored JSON (`editor.setComponents(saved.components)`), and
+`this.components(html)` **replaces** children (not "insert if empty"). So on every reload,
+the pristine server HTML silently overwrote any edits — text changes in the canvas
+appeared to save but were wiped on next load.
+
+**Fix — content is now a template, not raw HTML, for fields that need to be editable:**
+
+- Server `content[name]` can be either a plain string (legacy, fully server-driven, never
+  user-editable — footer/header/newsletter/pricing-cards today) or an object
+  `{ template, ...fields }` (hero today) where `template` contains `{{fieldName}}`
+  placeholders and `fields` gives their default values.
+- `plugin.js` detects which shape it got: string → `defaults.content = content[name]`;
+  object → destructure `{ template, ...fields }`, `Object.assign(defaults, fields)`,
+  `defaults.content = template`.
+- `themed-block.js` has a generic `renderContent()`: substitutes every `{{key}}` in
+  `this.get("content")` with `this.get(key)` via regex, then `this.components(html)`.
+  It's generic on purpose — it doesn't know or care which field names exist, it just
+  reads whatever key the template names and looks it up on the model.
+- Editable pieces (e.g. `hero`'s `buttonText`) are declared as normal GrapesJS **Traits**
+  (`changeProp: 1`). Trait values live as plain model props, so they're included in
+  `editor.getComponents().toJSON()` and correctly restored by `setComponents()` — unlike
+  freeform RTE-edited children, which live in the `components` collection and get wiped
+  every time `renderContent()` reruns. This is what actually fixes the bug: only
+  Trait-backed fields survive save/reload; everything else in the template is safe to
+  regenerate from the server on every load (and *should* — it's DB data, not user edits).
+- `hero.js` no longer defines its own `init()` — it inherits `themed-block`'s generic
+  `init()` (calls `renderContent()` + `updateContent()`, wires both to `watchProps`).
+  Only `footer`/`header`/`newsletter`/`pricing-cards` still override `init()` themselves
+  (not yet migrated to this pattern).
+
+**v1 scope decision (2026-07-07):** only Traits-exposed fields are editable. Double-clicking
+directly into canvas text (heading, button, anything not wired as a Trait) still *looks*
+editable via GrapesJS's default RTE, but the edit is silently discarded next time
+`renderContent()` runs (theme change, reload) — `editable: false` on the component's own
+root blocks RTE on itself, but does **not** cascade to children inserted via
+`this.components(html)`, which default to `editable: true` individually. Locking those
+children too (loop over `this.components()` after render, set `editable: false` /
+`removable: false` on each) was scoped out of v1 to avoid over-building before the
+inline-edit-to-Trait sync (double-click writes back into the Trait prop) is designed —
+tracked as follow-up work, not yet implemented.
+
+### Interactive behavior in components (`script` / `script-props`)
+
+- `defaults.script` is a plain function GrapesJS serializes and runs against the
+  component's real DOM node (`this`) — works both in the canvas iframe and in exported
+  production HTML. Must be self-contained (no outer closures), since it's stringified.
+- `script` only executes once, at initial render. If the component's DOM gets
+  regenerated (e.g. `renderContent()` rebuilding children on a trait change), the
+  handler is lost on the new node unless `defaults["script-props"]` lists the trait
+  names that should trigger a script re-run. Example on `hero`: click handler on
+  `.hero-button` needs `"script-props": ["theme", "buttonText"]` to survive a theme
+  change, because `watchProps` (our own mechanism, drives `renderContent`) and
+  `script-props` (GrapesJS's own mechanism, drives script re-execution) are separate
+  and must both list the same trait names.
 
 ### Save / restore editor state
 
@@ -114,31 +171,40 @@ POST /api/save/:storeId      → saves { components, html, css } to *.save.json
 
 ### Themed components (hero, footer, header, newsletter)
 
+`hero` is the reference implementation of the template + Traits pattern (see above).
+It relies on `themed-block`'s generic `init()`/`renderContent()` and only overrides
+`updateContent()` for its own theme classes:
+
 ```js
 defaults: {
   tagName: "section",
   theme: "light",
-  apiUrl: "http://localhost:3001/api/content/acme", // overridden by plugin.js
-  watchProps: ["theme"], // only theme triggers updateContent
-  traits: [/* only theme select */],
+  buttonText: "",       // editable field, default comes from server content
+  content: "",          // template string with {{buttonText}}, injected by plugin.js
+  editable: false,      // blocks RTE on the component's own root (not on its children — see gotchas)
+  script: function () {
+    const button = this.querySelector(".hero-button");
+    if (button) button.addEventListener("click", () => console.log("button clicked"));
+  },
+  "script-props": ["theme", "buttonText"], // re-run script when either changes
+  watchProps: ["theme", "buttonText"],     // re-run renderContent/updateContent when either changes
+  traits: [
+    { type: "select", name: "theme", changeProp: 1, options: [/* ... */] },
+    { type: "text", name: "buttonText", label: "Button text", changeProp: 1 },
+  ],
 },
 
-async init() {
-  const data = await fetch(this.get("apiUrl")).then(r => r.json());
-  if (data.hero) this.components(data.hero); // insert server HTML
-  this.updateContent();
-  // manually wire watchProps (themed-block's init() is overridden)
-  const events = this.get("watchProps").map(p => `change:${p}`).join(" ");
-  this.on(events, this.updateContent);
-},
+// no init() — inherited from themed-block
 
 updateContent() {
   const theme = this.get("theme");
-  this.removeClass(["hero-light", "hero-dark"]);
+  this.removeClass(["hero-light", "hero-dark", "hero-image"]);
   this.addClass(`hero-${theme}`);
-  // NO this.components() call — content comes from server
 },
 ```
+
+`footer`/`header`/`newsletter`/`pricing-cards` still use the older pattern (own `init()`,
+plain-string `content`, no editable Traits beyond theme) — not yet migrated.
 
 ### Container/child components (pricing-cards + pricing-card)
 
@@ -162,9 +228,24 @@ in the current server-HTML approach.
 - Traits need `changeProp: 1` — otherwise `updateContent()` never sees the new value.
 - `editor.Components.addType()` must be called after `opts` overrides are applied.
 - `themed-block.init()` is overridden when a component defines its own `init()` —
-  must manually wire `watchProps` listeners and call `updateContent()`.
+  must manually wire `watchProps` listeners and call `updateContent()`. (`hero` no
+  longer does this — see template + Traits pattern above.)
 - Dynamic `import()` from `public/` is blocked by Vite in dev — use fetch + Blob URL.
 - Child components must be registered before their parent containers.
+- **`this.components(html)` replaces children, it doesn't append/insert-if-empty.**
+  Calling it unconditionally in `init()` wipes anything restored from saved JSON —
+  this was the root cause of the "edits don't persist" bug (see above).
+- **`editable: false` only blocks RTE on the component's own root**, not on children
+  inserted via `this.components(html)` — those default to individually editable.
+  Double-clicking them still looks like it works but the edit is discarded on next
+  re-render. Not yet fixed (v1 scope decision, see above).
+- **`script` runs once at initial render only.** If the component's DOM is regenerated
+  on a trait change, the script (and any event listeners it attached) is gone on the
+  new node unless `defaults["script-props"]` lists that trait's name.
+- Editing files under `public/components/*.js` requires a **hard reload** (not just
+  HMR) to see changes — they're fetched via `fetch()` + Blob URL + dynamic `import()`
+  on app boot (see Dynamic component loading above), which the browser can cache like
+  any other HTTP request.
 
 ---
 
