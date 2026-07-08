@@ -11,8 +11,8 @@ export default {
       name: "Hero",
       theme: "light",
       buttonText: "",
+      headingText: "",
       content: "",
-      editable: false,
       script: function() {
         const button = this.querySelector(".hero-button");
         if (button) {
@@ -20,8 +20,6 @@ export default {
         }
       },
       "script-props": ["theme", "buttonText"],
-
-      watchProps: ["theme", "buttonText"],
 
       traits: [
         {
@@ -40,6 +38,14 @@ export default {
           name: "buttonText",
           label: "Button text",
           changeProp: 1,
+          selector: ".hero-button",
+        },
+        {
+          type: "text",
+          name: "headingText",
+          label: "Heading text",
+          changeProp: 1,
+          selector: ".hero-heading"
         }
       ],
     },

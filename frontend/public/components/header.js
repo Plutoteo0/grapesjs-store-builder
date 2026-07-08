@@ -13,8 +13,6 @@ export default {
       theme: "light",
       content: "",
 
-      watchProps: ["theme"],
-
       traits: [
         {
           type: "select",
@@ -30,15 +28,7 @@ export default {
       ],
     },
 
-    async init() {
-      const html = this.get("content");
-      if (html) this.components(html);
-      this.updateContent();
-
-      const watchProps = this.get("watchProps") || [];
-      const events = watchProps.map((p) => `change:${p}`).join(" ");
-      if (events) this.on(events, this.updateContent);
-    },
+    // no init() — inherited from themed-block
 
     updateContent() {
       const theme = this.get("theme");

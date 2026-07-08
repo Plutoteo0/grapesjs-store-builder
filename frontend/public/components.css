@@ -330,3 +330,35 @@
   background: #fff;
   color: #111;
 }
+
+/* Testimonial base layout */
+.testimonial {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.testimonial-quote {
+  font-size: 22px;
+  font-style: italic;
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.testimonial-author {
+  font-size: 14px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+
+/* Testimonial themes */
+.testimonial-light {
+  background: #fafafa;
+  color: #111;
+}
+
+.testimonial-dark {
+  background: #111;
+  color: #fff;
+}

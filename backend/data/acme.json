@@ -21,22 +21,64 @@
       "cssUrl": "/styles/acme/newsletter.1.0.0.css"
     },
     {
+      "name": "pricing-card",
+      "url": "/components/pricing-card.js"
+    },
+    {
       "name": "pricing-cards",
       "url": "/components/pricing-cards.js",
       "cssUrl": "/styles/acme/pricing-cards.1.0.0.css"
+    },
+    {
+      "name": "testimonial",
+      "url": "/components/testimonial.js",
+      "cssUrl": "/styles/acme/testimonial.1.0.0.css"
     }
   ],
   "content": {
     "hero": {
-      "template": "<h1 class=\"hero-heading\">Welcome to Acme</h1><p class=\"hero-subheading\">The best products for your business</p><button class=\"hero-button\">{{ buttonText }}</button>",
-      "buttonText": "Get started"
+      "template": "<h1 class=\"hero-heading\">{{ headingText }}</h1><p class=\"hero-subheading\">The best products for your business</p><button class=\"hero-button\">{{ buttonText }}</button>",
+      "buttonText": "Get started",
+      "headingText": "Welcome to acme"
     },
     "footer": "<div class=\"footer-inner\"><span>© Acme Corp</span></div>",
 
     "header": "<div class=\"header-logo\">Acme Corp</div><nav class=\"header-nav\"><a href=\"#\">Home</a><a href=\"#\">About</a><a href=\"#\">Services</a><a href=\"#\">Contact</a></nav><button class=\"header-cta\">Sign In</button>",
 
-    "newsletter": "<div class=\"newsletter-inner\"><h2 class=\"newsletter-heading\">Subscribe to Acme News</h2><p class=\"newsletter-subheading\">Get the best deals first</p><div class=\"newsletter-form\"><input type=\"email\" class=\"newsletter-input\" placeholder=\"Enter your email\" /><button class=\"newsletter-button\">Subscribe</button></div></div>",
 
-    "pricing-cards": "<div class=\"pricing-cards-inner\"><div class=\"pricing-card\"><img src=\"https://picsum.photos/seed/starter/280/160\" alt=\"Starter\" class=\"pricing-card-image\" /><h3 class=\"pricing-card-title\">Starter</h3><p class=\"pricing-card-price\">$19/mo</p><p class=\"pricing-card-desc\">Perfect for individuals just getting started.</p><button class=\"pricing-card-button\">Choose Plan</button></div><div class=\"pricing-card\"><img src=\"https://picsum.photos/seed/pro/280/160\" alt=\"Pro\" class=\"pricing-card-image\" /><h3 class=\"pricing-card-title\">Pro</h3><p class=\"pricing-card-price\">$49/mo</p><p class=\"pricing-card-desc\">For growing teams that need more power.</p><button class=\"pricing-card-button\">Choose Plan</button></div><div class=\"pricing-card\"><img src=\"https://picsum.photos/seed/enterprise/280/160\" alt=\"Enterprise\" class=\"pricing-card-image\" /><h3 class=\"pricing-card-title\">Enterprise</h3><p class=\"pricing-card-price\">$99/mo</p><p class=\"pricing-card-desc\">Advanced features for large organizations.</p><button class=\"pricing-card-button\">Choose Plan</button></div></div>"
+    "newsletter": {
+      "template": "<h2 class=\"newsletter-heading\">{{ newsHeading }}</h2><p class=\"newsletter-subheading\">Get the best deals first</p><div class=\"newsletter-form\"><input type=\"email\" class=\"newsletter-input\" placeholder=\"Enter your email\" /><button class=\"newsletter-button\">Subscribe</button></div>",
+      "newsHeading": "Subscribe to Acme News"
+    },
+
+    "pricing-cards": {
+      "cards": [
+        {
+          "title": "Starter",
+          "price": "$19/mo",
+          "desc": "Perfect for individuals just getting started.",
+          "image": "https://picsum.photos/seed/starter/280/160",
+          "buttonText": "Choose Plan"
+        },
+        {
+          "title": "Pro",
+          "price": "$49/mo",
+          "desc": "For growing teams that need more power.",
+          "image": "https://picsum.photos/seed/pro/280/160",
+          "buttonText": "Choose Plan"
+        },
+        {
+          "title": "Enterprise",
+          "price": "$99/mo",
+          "desc": "Advanced features for large organizations.",
+          "image": "https://picsum.photos/seed/enterprise/280/160",
+          "buttonText": "Choose Plan"
+        }
+      ]
+    },
+    "testimonial": {
+      "template": "<p class=\"testimonial-quote\">{{ quote }}</p><span class=\"testimonial-author\">- Jane</span>",
+      "quote": "Great product!"
+    } 
   }
 }

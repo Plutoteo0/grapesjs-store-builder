@@ -9,12 +9,19 @@ export default {
     defaults: {
       tagName: "div",
       name: "Pricing Cards",
-      content: "",
+      classes: ["pricing-cards", "pricing-grid-3"],
+      cards: [], // array of { title, price, desc, image, buttonText } from backend content
     },
 
-    async init() {
-      const html = this.get("content");
-      if (html) this.components(html);
+    
+    init() {
+      const cards = this.get("cards") || [];
+
+      if (!this.components().length) {
+        cards.forEach((card) => {
+          this.components().add({ type: "pricing-card", ...card });
+        });
+      }
     },
   },
 };

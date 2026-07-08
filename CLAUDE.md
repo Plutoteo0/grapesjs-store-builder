@@ -26,27 +26,25 @@ grapesjs-components-poc/
   frontend/
     src/
       App.jsx              # async manifest fetch, save/restore, GjsEditor
-      plugin.js            # registers pre-loaded modules + apiUrl injection
+      plugin.js            # registers pre-loaded modules + content-shape injection
       components/
-        themed-block.js    # base type (still bundled, always needed)
-        _template.js
-        footer.js          # fetches HTML from API on init
-        header.js          # fetches HTML from API on init
-        hero.js            # fetches HTML from API on init
-        newsletter.js      # fetches HTML from API on init
-        pricing-cards.js   # container — manages pricing-card children
-        pricing-card.js    # child — own traits, draggable only inside container
-        nav-container.js   # child container for nav items (inside header)
-        nav-item.js        # child — label + url traits
+        themed-block.js    # base type (bundled, always needed) — generic init/renderContent
+        _template.js       # copy-paste starting point for a new component
     public/
-      components/          # deployed component files (served as static assets)
-      styles/              # per-client CSS overrides (planned, not yet wired)
-      components.css       # base styles for all clients
+      components/          # deployed component files (served as static assets, fetched at runtime)
+        footer.js           # themed-block pattern, no editable fields beyond theme
+        header.js           # themed-block pattern, no editable fields beyond theme
+        hero.js              # reference impl of template + Traits + inline-edit pattern
+        newsletter.js        # themed-block pattern, headingText editable inline
+        pricing-cards.js     # container — builds pricing-card children from data, own init()
+        pricing-card.js      # child — title (inline-editable), image (Traits-only), price (locked)
+      styles/               # per-client CSS overrides (planned, not yet wired)
+      components.css        # base styles for all clients
   backend/
     server.js              # Express API
     data/
-      acme.json            # manifest + HTML content for Acme
-      beta.json            # manifest + HTML content for Beta
+      acme.json            # manifest + content for Acme
+      beta.json            # manifest + content for Beta (still on the older per-name-string content shape)
       acme.save.json       # saved editor state for Acme (auto-generated)
 ```
 
@@ -68,11 +66,13 @@ Components are no longer bundled into the app. Flow on page load:
 
 ### Content loading (server-rendered HTML)
 
-- Each component has `apiUrl` in its `defaults`
-- `plugin.js` injects the correct `apiUrl` for the current store before registration
-- Component's `init()` fetches `GET /api/content/acme`, takes its slice (`data.hero`),
-  and calls `this.components(html)`
-- `updateContent()` only handles theme class — never touches content
+- `App.jsx` fetches `GET /api/content/acme` once, up front — not per-component.
+- The whole content map is passed into `plugin.js` as `opts.content`; for each module,
+  `plugin.js` looks up `content[name]` and merges it into that component's `defaults`
+  before `editor.Components.addType()` runs (see the three content shapes above).
+- Components never fetch their own content — they just read `this.get("content")`
+  (and whatever fields plugin.js merged in) at render time.
+- `updateContent()` only handles theme class — never touches content.
 
 Why: server knows the client's real data (products, company name, etc.). Component
 just renders what it receives. Content changes = update the DB, no code change needed.
@@ -88,17 +88,19 @@ appeared to save but were wiped on next load.
 
 **Fix — content is now a template, not raw HTML, for fields that need to be editable:**
 
-- Server `content[name]` can be either a plain string (legacy, fully server-driven, never
-  user-editable — footer/header/newsletter/pricing-cards today) or an object
-  `{ template, ...fields }` (hero today) where `template` contains `{{fieldName}}`
-  placeholders and `fields` gives their default values.
-- `plugin.js` detects which shape it got: string → `defaults.content = content[name]`;
-  object → destructure `{ template, ...fields }`, `Object.assign(defaults, fields)`,
-  `defaults.content = template`.
+- Server `content[name]` can be one of three shapes, detected in `plugin.js`:
+  1. plain string → fully server-driven, nothing in it is user-editable. `defaults.content = content[name]`.
+  2. object with a `template` key, `{ template, ...fields }` (hero, newsletter) → `template`
+     has `{{fieldName}}` placeholders, `fields` gives their per-store values.
+     `Object.assign(defaults, fields)`, `defaults.content = template`.
+  3. object *without* a `template` key (pricing-cards' `{ cards: [...] }`) → structured data
+     for a container that builds its own typed children, not a substitution template.
+     `Object.assign(defaults, content[name])` directly — no `content` string involved at all.
 - `themed-block.js` has a generic `renderContent()`: substitutes every `{{key}}` in
   `this.get("content")` with `this.get(key)` via regex, then `this.components(html)`.
-  It's generic on purpose — it doesn't know or care which field names exist, it just
-  reads whatever key the template names and looks it up on the model.
+  Generic on purpose — doesn't know which field names exist, just reads whatever key
+  the template names and looks it up on the model. If a `{{key}}` has no matching field
+  in `defaults`, it logs a `console.warn` instead of silently rendering an empty string.
 - Editable pieces (e.g. `hero`'s `buttonText`) are declared as normal GrapesJS **Traits**
   (`changeProp: 1`). Trait values live as plain model props, so they're included in
   `editor.getComponents().toJSON()` and correctly restored by `setComponents()` — unlike
@@ -106,21 +108,58 @@ appeared to save but were wiped on next load.
   every time `renderContent()` reruns. This is what actually fixes the bug: only
   Trait-backed fields survive save/reload; everything else in the template is safe to
   regenerate from the server on every load (and *should* — it's DB data, not user edits).
-- `hero.js` no longer defines its own `init()` — it inherits `themed-block`'s generic
-  `init()` (calls `renderContent()` + `updateContent()`, wires both to `watchProps`).
-  Only `footer`/`header`/`newsletter`/`pricing-cards` still override `init()` themselves
-  (not yet migrated to this pattern).
+- All of `hero`/`footer`/`header`/`newsletter` are migrated to this pattern now — none of
+  them define their own `init()`, all inherit `themed-block`'s generic one.
+  `pricing-cards` is the one exception, and deliberately so — see container/child pattern
+  below, it isn't rendering a `{{}}` template at all.
 
-**v1 scope decision (2026-07-07):** only Traits-exposed fields are editable. Double-clicking
-directly into canvas text (heading, button, anything not wired as a Trait) still *looks*
-editable via GrapesJS's default RTE, but the edit is silently discarded next time
-`renderContent()` runs (theme change, reload) — `editable: false` on the component's own
-root blocks RTE on itself, but does **not** cascade to children inserted via
-`this.components(html)`, which default to `editable: true` individually. Locking those
-children too (loop over `this.components()` after render, set `editable: false` /
-`removable: false` on each) was scoped out of v1 to avoid over-building before the
-inline-edit-to-Trait sync (double-click writes back into the Trait prop) is designed —
-tracked as follow-up work, not yet implemented.
+**`watchProps` and inline-edit whitelist are derived from `traits`, not hand-declared
+(2026-07-08):** originally each component listed its own `defaults.watchProps` array and
+(briefly) its own `defaults.editableSelectors` map — both duplicated information already
+present in `traits`. Now `themed-block.init()` computes both from `this.getTraits()`:
+- `watchProps` = name of every trait with `changeProp` set.
+- the inline-edit whitelist = every trait that *also* has a custom `selector` key (e.g.
+  `{ type: "text", name: "headingText", changeProp: 1, selector: ".hero-heading" }`).
+  `selector` isn't a GrapesJS-known key — Trait models are plain Backbone models and
+  happily carry any extra attribute you give them.
+- A trait with `changeProp` but no `selector` (e.g. `theme`, or `pricing-card`'s `image`)
+  is watched (re-renders on change, appears in the Traits panel) but **not**
+  double-click-editable in canvas — for `image` specifically because an `<img>` has no
+  text content for RTE to edit anyway; it's Traits-panel-only.
+- One field to declare (`traits`), not four (`defaults` + `watchProps` + `editableSelectors`
+  + `traits` kept in sync by hand).
+
+**Inline edit → Trait sync (double-click in canvas actually persists now, 2026-07-08):**
+`renderContent()` walks the full (recursive, not just direct-children) subtree of every
+rendered component. For each descendant:
+- if its classes match a whitelisted `selector` → `editable: true`, and it gets a
+  `child.on("rte:disable", ...)` listener that writes `child.getEl().innerText` back into
+  the owning Trait via `this.set(prop, ...)`.
+- otherwise → `editable: false, removable: false` (locked, whether it's a leaf or a
+  wrapper — recursion still walks into a locked wrapper's own children, so nested
+  structure no longer needs to avoid extra wrapper `<div>`s).
+- `rte:disable` fires **directly on the child component's model**, with no arguments —
+  confirmed by reading GrapesJS's own source (`ComponentTextView.toggleEvents`:
+  `model.trigger(enable ? rteEvents.enable : rteEvents.disable)`). The public docs example
+  (`editor.on('rte:disable', (view, rte) => {...})`) describes a *different*, editor-level
+  event that this trigger never reaches — listening on `this.em` doesn't work here, you
+  have to listen on the child model directly.
+- Matching is done via `child.getClasses().includes(selector.replace(/^\./, ""))`, not
+  `child.getEl().matches(selector)` — `getEl()` returns `undefined` until the component's
+  view has actually rendered, which it hasn't yet at the point `renderContent()` runs
+  synchronously inside `init()`. `getClasses()` reads straight off the model, no render
+  wait needed. (`getEl()` *is* safe to call later, inside the `rte:disable` callback —
+  by then the user has actually clicked into the rendered view.)
+- If a whitelisted `selector` matches nothing after a render, `renderContent()` logs a
+  `console.warn` (dead/misspelled selector) instead of failing silently.
+
+**Known gap:** stores still on the plain-string content shape for a component that *also*
+declares inline-editable traits (e.g. `beta.json`'s `hero`/`newsletter`, never migrated to
+the template shape) will hit the original persistence bug again for that field — the
+canvas edit looks like it works, but the next `renderContent()` re-derives from the static
+string and discards it, because there's no `{{fieldName}}` placeholder tying the Trait to
+the DOM in the first place. Only `acme.json` has been migrated to the template shape for
+hero/newsletter/pricing-cards so far.
 
 ### Interactive behavior in components (`script` / `script-props`)
 
@@ -150,9 +189,11 @@ tracked as follow-up work, not yet implemented.
 Accepts pre-loaded modules, no longer uses `import.meta.glob`:
 
 ```js
-const { modules = [], apiUrl, ...clientOpts } = opts;
-// modules   → array of { name, config } — register in order
-// apiUrl    → injected into each component's defaults.apiUrl
+const { modules = [], content, ...clientOpts } = opts;
+// modules    → array of { name, config } — register in order
+// content    → the store's full content map from GET /api/content/:storeId; plugin.js
+//              picks content[name] per component and merges it into that component's
+//              defaults per the three content shapes (see persistence-bug section above)
 // clientOpts → per-component default overrides (currently unused, storeConfig removed)
 ```
 
@@ -171,30 +212,32 @@ POST /api/save/:storeId      → saves { components, html, css } to *.save.json
 
 ### Themed components (hero, footer, header, newsletter)
 
-`hero` is the reference implementation of the template + Traits pattern (see above).
-It relies on `themed-block`'s generic `init()`/`renderContent()` and only overrides
-`updateContent()` for its own theme classes:
+`hero` is the reference implementation of the template + Traits + inline-edit pattern.
+All four (`hero`/`footer`/`header`/`newsletter`) now follow it — none define their own
+`init()`, all rely on `themed-block`'s generic one:
 
 ```js
 defaults: {
   tagName: "section",
   theme: "light",
   buttonText: "",       // editable field, default comes from server content
-  content: "",          // template string with {{buttonText}}, injected by plugin.js
-  editable: false,      // blocks RTE on the component's own root (not on its children — see gotchas)
+  headingText: "",
+  content: "",          // template string with {{buttonText}}/{{headingText}}, injected by plugin.js
   script: function () {
     const button = this.querySelector(".hero-button");
     if (button) button.addEventListener("click", () => console.log("button clicked"));
   },
   "script-props": ["theme", "buttonText"], // re-run script when either changes
-  watchProps: ["theme", "buttonText"],     // re-run renderContent/updateContent when either changes
+
   traits: [
-    { type: "select", name: "theme", changeProp: 1, options: [/* ... */] },
-    { type: "text", name: "buttonText", label: "Button text", changeProp: 1 },
+    { type: "select", name: "theme", changeProp: 1, options: [/* ... */] }, // no selector: not inline-editable
+    { type: "text", name: "buttonText", label: "Button text", changeProp: 1, selector: ".hero-button" },
+    { type: "text", name: "headingText", label: "Heading text", changeProp: 1, selector: ".hero-heading" },
   ],
 },
 
 // no init() — inherited from themed-block
+// no watchProps, no editableSelectors — both derived from traits above
 
 updateContent() {
   const theme = this.get("theme");
@@ -203,42 +246,66 @@ updateContent() {
 },
 ```
 
-`footer`/`header`/`newsletter`/`pricing-cards` still use the older pattern (own `init()`,
-plain-string `content`, no editable Traits beyond theme) — not yet migrated.
+Note there's no explicit `editable: false` on the root anymore either — that's already
+GrapesJS's own default for every component, so setting it was redundant.
 
 ### Container/child components (pricing-cards + pricing-card)
 
-`pricing-cards` manages children via `this.components().add/remove` instead of
-HTML string regeneration — preserves inline edits when card count changes.
+Unlike the themed components above, `pricing-cards` doesn't render a `{{}}` substitution
+template — its content shape from the backend is `{ cards: [...] }` (an array of per-card
+data), because a single trait can only ever hold *one* value, and there are three cards
+each needing independent `title`/`price`/`image`/etc. So it can't reuse the generic
+template mechanism at all; it needs to build three distinct, independently-addressable
+child *components*.
 
-`pricing-card` has its own traits (title, price, description, image, buttonText).
-`draggable: ".pricing-cards"` prevents dropping outside the container.
-
-### nav-container + nav-item (inside header)
-
-Same container/child pattern. Header fetches its full HTML from server — nav items
-are part of that HTML, not managed as GrapesJS child components anymore.
-`nav-container` and `nav-item` remain registered but are not used by header
-in the current server-HTML approach.
+- `pricing-cards.js` defines its **own** `init()` (does not call/inherit `themed-block`'s):
+  reads `this.get("cards")`, and if `this.components()` is empty (fresh load, not a
+  restore), does `this.components().add({ type: "pricing-card", ...cardData })` once per
+  card. The empty-check is the same persistence-bug guard as before, just "add" instead
+  of "replace" — a restored save already has its 3 `pricing-card` children by the time
+  `init()` runs, so re-adding would duplicate them.
+- `pricing-card.js` is a normal themed-block component (inherits the generic
+  `init()`/`renderContent()` same as hero) — it just happens to get instantiated
+  programmatically by its container instead of coming from the manifest/Blocks panel
+  directly. Its own `content` template is hardcoded in the component file (same markup
+  for every card), only the field *values* (`title`, `price`, `desc`, `image`,
+  `buttonText`) differ per instance, set at creation time via `.add({ type, ...cardData })`.
+  `title` has a `selector` (inline-editable + synced), `image` has a trait but no
+  `selector` (Traits-panel-only — an `<img>` has no text for RTE), `price` has no trait
+  at all (locked completely, meant to come from a real DB later).
+- `draggable: ".pricing-cards"` on `pricing-card` restricts it to only be
+  dropped/moved inside the container.
 
 ---
 
 ## Known GrapesJS gotchas
 
-- Traits need `changeProp: 1` — otherwise `updateContent()` never sees the new value.
+- Traits need `changeProp: 1` — otherwise the field isn't watched at all (no re-render,
+  doesn't count as "changed") and, if it also has a `selector`, isn't inline-editable either.
 - `editor.Components.addType()` must be called after `opts` overrides are applied.
-- `themed-block.init()` is overridden when a component defines its own `init()` —
-  must manually wire `watchProps` listeners and call `updateContent()`. (`hero` no
-  longer does this — see template + Traits pattern above.)
+- A component that defines its own `init()` (currently only `pricing-cards`) completely
+  overrides `themed-block`'s generic one — no automatic `watchProps`/inline-edit derivation,
+  no `renderContent()`. Only do this when the content genuinely isn't a `{{}}` template
+  (e.g. a container building typed children from an array).
 - Dynamic `import()` from `public/` is blocked by Vite in dev — use fetch + Blob URL.
-- Child components must be registered before their parent containers.
+- Child component types must be registered before their parent containers reference them
+  by `type` (manifest order matters — see `pricing-card` before `pricing-cards`).
 - **`this.components(html)` replaces children, it doesn't append/insert-if-empty.**
-  Calling it unconditionally in `init()` wipes anything restored from saved JSON —
-  this was the root cause of the "edits don't persist" bug (see above).
-- **`editable: false` only blocks RTE on the component's own root**, not on children
-  inserted via `this.components(html)` — those default to individually editable.
-  Double-clicking them still looks like it works but the edit is discarded on next
-  re-render. Not yet fixed (v1 scope decision, see above).
+  Calling it unconditionally in `init()` wipes anything restored from saved JSON — this
+  was the root cause of the original "edits don't persist" bug. Same shape of bug applies
+  to `.add()`-based containers too (see `pricing-cards`' empty-check guard).
+- **A store's `content[name]` must use the `{ template, ...fields }` shape (not a plain
+  string) for any field that's also declared as an inline-editable Trait** — otherwise
+  there's no `{{fieldName}}` placeholder in the rendered HTML for the Trait to actually
+  drive, and edits get silently discarded on the next render. `acme.json` is migrated for
+  hero/newsletter/pricing-cards; `beta.json` is not (see persistence-bug section above).
+- **`rte:disable` fires directly on the child component's model, with no arguments** —
+  not on `editor`/`em`, despite what GrapesJS's own doc comment for the event implies.
+  Listen with `child.on("rte:disable", ...)`, not `this.em.on(...)`.
+- **`getEl()` returns `undefined` until the component's view has rendered** — which hasn't
+  happened yet at the point `renderContent()` runs synchronously inside `init()`. Match
+  inline-editable children by `getClasses()` (reads the model, always available), not by
+  `getEl()?.matches(selector)`.
 - **`script` runs once at initial render only.** If the component's DOM is regenerated
   on a trait change, the script (and any event listeners it attached) is gone on the
   new node unless `defaults["script-props"]` lists that trait's name.

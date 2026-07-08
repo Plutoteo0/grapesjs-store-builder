@@ -10,10 +10,10 @@ export default {
     defaults: {
       tagName: "div",
       name: "Newsletter",
+      classes: ["newsletter-inner"],
       theme: "light",
       content: "",
-
-      watchProps: ["theme"],
+      newsHeading: "Welcome",
 
       traits: [
         {
@@ -26,18 +26,17 @@ export default {
             { value: "dark", name: "Dark" },
           ],
         },
+        {
+          type: "text",
+          name: "newsHeading",
+          label: "Heading",
+          changeProp: 1,
+          selector: ".newsletter-heading"
+        },
       ],
     },
 
-    async init() {
-      const html = this.get("content");
-      if (html) this.components(html);
-      this.updateContent();
-
-      const watchProps = this.get("watchProps") || [];
-      const events = watchProps.map((p) => `change:${p}`).join(" ");
-      if (events) this.on(events, this.updateContent);
-    },
+    // no init() — inherited from themed-block
 
     updateContent() {
       const theme = this.get("theme");

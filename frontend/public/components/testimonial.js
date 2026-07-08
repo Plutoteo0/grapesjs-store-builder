@@ -1,17 +1,20 @@
 export default {
   extend: "themed-block",
+
   blockInfo: {
-    label: "Footer",
+    label: "Testimonial",
     category: "Sections",
-    icon: "fa fa-window-minimize",
+    icon: "fa fa-quote-right",
   },
 
   model: {
     defaults: {
-      tagName: "footer",
-      name: "Footer",
+      tagName: "div",
+      name: "Testimonial",
+      classes: ["testimonial"],
       theme: "light",
-      content: "",
+      content: "",       
+      quote: "",          
 
       traits: [
         {
@@ -22,18 +25,24 @@ export default {
           options: [
             { value: "light", name: "Light" },
             { value: "dark", name: "Dark" },
-            { value: "social", name: "With Social Media" },
           ],
+        },
+        {
+          type: "text",
+          name: "quote",
+          label: "Quote",
+          changeProp: 1,
+          selector: ".testimonial-quote",
         },
       ],
     },
 
-    // no init() — inherited from themed-block
+    
 
     updateContent() {
       const theme = this.get("theme");
-      this.removeClass(["footer-light", "footer-dark", "footer-social"]);
-      this.addClass(`footer-${theme}`);
+      this.removeClass(["testimonial-light", "testimonial-dark"]);
+      this.addClass(`testimonial-${theme}`);
     },
   },
 };
