@@ -37,13 +37,17 @@
   ],
   "content": {
     "hero": {
-      "template": "<h1 class=\"hero-heading\">{{ headingText }}</h1><p class=\"hero-subheading\">The best products for your business</p><button class=\"hero-button\">{{ buttonText }}</button>",
+      "template": "<div class=\"hero-inner\"><h1 class=\"hero-heading\">{{ headingText }}</h1><p class=\"hero-subheading\">The best products for your business</p><a href=\"#\" class=\"hero-button\">{{ buttonText }}</a></div>",
       "buttonText": "Get started",
       "headingText": "Welcome to acme"
     },
     "footer": "<div class=\"footer-inner\"><span>© Acme Corp</span></div>",
 
-    "header": "<div class=\"header-logo\">Acme Corp</div><nav class=\"header-nav\"><a href=\"#\">Home</a><a href=\"#\">About</a><a href=\"#\">Services</a><a href=\"#\">Contact</a></nav><button class=\"header-cta\">Sign In</button>",
+    "header": {
+      "template": "<div class=\"header-logo\">{{ logoText }}</div><nav class=\"header-nav\"><a href=\"#\">Home</a><a href=\"#\">About</a><a href=\"#\">Services</a><a href=\"#\">Contact</a></nav><a href=\"#\" class=\"header-cta\">{{ ctaText }}</a>",
+      "logoText": "Acme Corp",
+      "ctaText": "Sign In"
+    },
 
 
     "newsletter": {

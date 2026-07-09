@@ -62,12 +62,14 @@
 }
 
 .header-cta {
+  display: inline-block;
   border: none;
   border-radius: 6px;
   padding: 8px 18px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
+  text-decoration: none;
   transition: opacity 0.2s;
 }
 
@@ -145,12 +147,14 @@
 }
 
 .hero-button {
+  display: inline-block;
   border: none;
   border-radius: 8px;
   padding: 14px 32px;
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
+  text-decoration: none;
 }
 
 .hero-light {

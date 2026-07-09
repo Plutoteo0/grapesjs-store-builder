@@ -1,3 +1,12 @@
+function sanitizeRteHtml(html) {
+  return html
+    .replace(/\s(data-gjs-[\w-]+|draggable|data-selectme)="[^"]*"/g, "")
+    .replace(/\sclass="([^"]*)"/g, (match, classList) => {
+      const kept = classList.split(/\s+/).filter((c) => c && !c.startsWith("gjs-"));
+      return kept.length ? ` class="${kept.join(" ")}"` : "";
+    });
+}
+
 export default {
   model: {
     init() {
@@ -10,12 +19,24 @@ export default {
       );
 
       if (events) {
-        this.on(events, this.updateContent);
-        this.on(events, this.renderContent);
+        this.on(events, (m, v, opts) => {
+          this.updateContent();
+          if (!opts?.fromRte) this.renderContent()
+        });
       }
 
       this.updateContent();
-      this.renderContent();
+
+      if (!this.components().length) {
+        // fresh load — no restored children yet, build from template
+        this.renderContent();
+      } else {
+        // restore — children already exist from setComponents(), don't
+        // reparse them through this.components(html) (would turn any
+        // formatting tag saved inside a trait's HTML into a new locked
+        // child), just (re)wire editable/rte:disable on what's there
+        this.wireEditableChildren();
+      }
     },
 
     updateContent() {
@@ -37,6 +58,11 @@ export default {
       const html = template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, key) => this.get(key) ?? "");
       this.components(html);
 
+      this.wireEditableChildren();
+    },
+
+    wireEditableChildren() {
+      const componentLabel = this.get("name") || this.cid;
       const editableMap = this._editableMap || {}
       const matchedSelectors = new Set();
 
@@ -56,7 +82,7 @@ export default {
             matchedSelectors.add(selector);
             child.off("rte:disable");
             child.on("rte:disable", () => {
-              this.set(prop, child.getEl()?.innerText ?? "")
+              this.set(prop, sanitizeRteHtml(child.getEl()?.innerHTML ?? ""), {fromRte: true})
             });
           }
 

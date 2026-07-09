@@ -313,6 +313,37 @@ child *components*.
   HMR) to see changes — they're fetched via `fetch()` + Blob URL + dynamic `import()`
   on app boot (see Dynamic component loading above), which the browser can cache like
   any other HTTP request.
+- **Syncing RTE-edited content back via `innerHTML` (not `innerText`) can silently lock
+  double-click editing after one round-trip, if that HTML contains any formatting tag
+  (`<b>`, `<u>`, etc).** Root cause: `renderContent()`'s `this.components(html)` is a
+  full HTML→component-tree parser, not a DOM `innerHTML` set — any nested tag in the
+  synced value becomes its own real child *Component* on the next render (that's why a
+  bolded/underlined span ends up with GrapesJS's own `data-gjs-type`/`draggable`/`id`
+  attributes). `renderContent()`'s `walk()` then locks that new child
+  (`editable: false`) because it has no matching trait `selector` (only a class match is
+  checked, and formatting tags typically carry no class). Clicking that locked nested
+  node should normally delegate up to the nearest editable text-type ancestor — but
+  GrapesJS's own `canActivate()` short-circuits: `!model.get('editable') || ... ||
+  (isInnerText = model.isChildOf('text'))` never evaluates the last operand once
+  `!editable` is already true, so the delegate-to-parent path never runs and the second
+  click does nothing (no selection at all). **Two separate fixes were needed, not one:**
+  (1) live editing — tag the `rte:disable`-driven `set()` call with a custom option
+  (`{ fromRte: true }`) and skip `renderContent()` for that specific change, since the
+  browser's own DOM already reflects the edit correctly — no rebuild needed in the same
+  session. (2) **restore-after-reload — `fromRte` alone does not cover this.** `init()`
+  used to call `renderContent()` unconditionally, with no `fromRte` guard, and that's
+  exactly the path a page reload takes: `editor.setComponents(saved.components)` already
+  restores the (possibly `<u>`-containing) child tree *before* `init()` runs, then
+  `init()`'s unconditional `renderContent()` re-parsed that same saved HTML through
+  `this.components(html)` again — reproducing the identical lock, just triggered by F5
+  instead of live typing. Fix: split `renderContent()`'s two responsibilities — building
+  the child tree from the template (`this.components(html)`) vs. wiring
+  `editable`/`rte:disable` onto whatever children currently exist (`walk()`, now its own
+  `wireEditableChildren()` method) — and in `init()`, only call the full
+  `renderContent()` when `!this.components().length` (fresh load, no restored children
+  yet, mirrors the guard `pricing-cards.js` already used for the same reason); otherwise
+  (restore) call `wireEditableChildren()` alone, which re-wires the listeners without
+  ever feeding the restored HTML back through the parser.
 
 ---
 

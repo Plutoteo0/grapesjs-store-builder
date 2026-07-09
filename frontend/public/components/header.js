@@ -12,6 +12,8 @@ export default {
       name: "Header",
       theme: "light",
       content: "",
+      logoText: "",
+      ctaText: "",
 
       traits: [
         {
@@ -24,6 +26,20 @@ export default {
             { value: "dark", name: "Dark" },
             { value: "transparent", name: "Transparent" },
           ],
+        },
+        {
+          type: "text",
+          name: "logoText",
+          label: "Logo text",
+          changeProp: 1,
+          selector: ".header-logo",
+        },
+        {
+          type: "text",
+          name: "ctaText",
+          label: "CTA button text",
+          changeProp: 1,
+          selector: ".header-cta",
         },
       ],
     },

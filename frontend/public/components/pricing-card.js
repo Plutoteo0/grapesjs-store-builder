@@ -5,16 +5,31 @@ export default {
     category: "Sections",
     icon: "fa fa-id-card",
   },
+  commands: {
+    "pricing-card:delete-confirm": {
+      run(editor) {
+        const selected = editor.getSelected();
+        if (window.confirm("Delete this card?")) {
+          selected.remove();
+        }
+      }
+    }
+  },
   model: {
     defaults: {
       tagName: "div",
       name: "Pricing Card",
       classes: ["pricing-card"],
-      draggable: ".pricing-cards", // only allowed to be dropped/moved inside the pricing-cards container
+      draggable: ".pricing-cards", 
       removable: true,
+      toolbar: [
+        { attributes: { class: "fa fa-arrows" }, command: "tlb-move" },
+        { attributes: { class: "fa fa-clone" }, command: "tlb-clone" },
+        { attributes: { class: "fa fa-trash" }, command: "pricing-card:delete-confirm" },
+      ],
 
       title: "",
-      price: "", // no trait below — comes from the DB later, not user-editable
+      price: "",
       desc: "",
       image: "",
       buttonText: "Choose Plan",
@@ -28,16 +43,21 @@ export default {
           name: "title",
           label: "Title",
           changeProp: 1,
-          selector: ".pricing-card-title", // allows double-click inline edit in canvas
+          selector: ".pricing-card-title",
         },
         {
           type: "text",
           name: "image",
           label: "Image URL",
-          changeProp: 1, // editable via the Traits panel only — an <img> has no
-          // text content, so there's nothing for double-click RTE to edit
+          changeProp: 1, 
         },
-        // price intentionally has no trait: locked until it's wired to real DB data
+        {
+          type: "text",
+          name: "desc",
+          label: "Description",
+          changeProp: 1,
+          selector: ".pricing-card-desc"
+        }
       ],
     },
   },
