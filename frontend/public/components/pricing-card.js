@@ -49,7 +49,8 @@ export default {
           type: "text",
           name: "image",
           label: "Image URL",
-          changeProp: 1, 
+          changeProp: 1,
+          selector: ".pricing-card-image", // enables Asset Manager on double-click (see themed-block wireEditableChildren)
         },
         {
           type: "text",

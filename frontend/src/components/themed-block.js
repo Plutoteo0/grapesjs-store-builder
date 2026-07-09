@@ -80,10 +80,18 @@ export default {
           if (entry) {
             const [selector, prop] = entry;
             matchedSelectors.add(selector);
-            child.off("rte:disable");
-            child.on("rte:disable", () => {
-              this.set(prop, sanitizeRteHtml(child.getEl()?.innerHTML ?? ""), {fromRte: true})
-            });
+
+            if (child.get("type") === "image") {
+              child.off("change:src");
+              child.on("change:src", () => {
+                this.set(prop, child.get("src") ?? "", { fromRte: true });
+              });
+            } else {
+              child.off("rte:disable");
+              child.on("rte:disable", () => {
+                this.set(prop, sanitizeRteHtml(child.getEl()?.innerHTML ?? ""), {fromRte: true})
+              });
+            }
           }
 
           // recurse regardless of match — a locked wrapper (e.g. a form div)
