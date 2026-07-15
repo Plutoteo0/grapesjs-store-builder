@@ -20,7 +20,8 @@ export default {
       tagName: "div",
       name: "Pricing Card",
       classes: ["pricing-card"],
-      draggable: ".pricing-cards", 
+      draggable: ".pricing-cards",
+      droppable: false, 
       removable: true,
       toolbar: [
         { attributes: { class: "fa fa-arrows" }, command: "tlb-move" },

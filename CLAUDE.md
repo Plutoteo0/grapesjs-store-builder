@@ -7,7 +7,16 @@ it doesn't need to be re-explained from scratch.
 
 **Working style:** collaborative, not hierarchical ("как команда"). Explain
 the logic behind changes, not just produce working code. Prefer generic,
-reusable solutions over one-off hardcoded fixes.
+reusable solutions over one-off hardcoded fixes. **For backend work
+specifically, the user writes the code themselves** — Claude explains
+approach, reviews diffs, points out bugs, doesn't author implementations
+unless explicitly asked to just write something.
+
+**Standing constraints from the internship supervisor, backend
+work:** no auth on the backend yet (deliberately deferred); reusable
+business logic must live in framework-agnostic `services/` modules that
+don't know about `req`/`res` — callable from a plain Node script with zero
+HTTP, routes stay a thin layer over services.
 
 ---
 
@@ -42,6 +51,11 @@ grapesjs-components-poc/
       components.css        # base styles for all clients
   backend/
     server.js              # Express API
+    services/
+      page-renderer.js     # framework-agnostic: reads saved page JSON, renders EJS partials → clean HTML
+    views/
+      components/
+        header.ejs          # milestone 1 (done) — EJS mirror of header.js's content template
     data/
       acme.json            # manifest + content for Acme
       beta.json            # manifest + content for Beta (still on the older per-name-string content shape)
@@ -344,6 +358,184 @@ child *components*.
   yet, mirrors the guard `pricing-cards.js` already used for the same reason); otherwise
   (restore) call `wireEditableChildren()` alone, which re-wires the listeners without
   ever feeding the restored HTML back through the parser.
+
+---
+
+## Backend production roadmap (agreed order)
+
+1. **DB**: Postgres + JSONB (not MySQL — JSON index flexibility). Tables:
+   `stores`, `store_components`, `store_content`, `store_pages`. Open: blob
+   vs normalized `store_pages.components_json`; draft/published history
+   before first migration?
+2. **Backend → DB**, same API contract — only `getStoreData()` internals change.
+3. **env files** for backend only (`DATABASE_URL` etc) — frontend untouched,
+   API contract stable.
+4. **JWT auth**, after DB (needs `users ↔ stores` table). Open: one user =
+   one store, or one user manages many (agency)? Determines whether
+   `:storeId` moves from URL into the token or stays in URL behind a
+   middleware access check.
+5. **Admin panel**, last, narrow scope: assigning components to a store +
+   locking specific canvas fields (e.g. `price` on `pricing-card`, meant to
+   come from a future product catalog). NOT for regular content editing —
+   GrapesJS inline-edit already covers that.
+
+Known bugs in current file-storage `backend/server.js`, fix at DB migration
+time (not before): path traversal (`storeId` unvalidated before
+`path.join()`), bare `catch {}` masking all error types, last-write-wins
+race on concurrent saves, no `req.body` validation before writing.
+
+### EJS page renderer (in progress — milestone 1 done, revised architecture 2026-07-15)
+
+**Goal:** after a page is saved in the editor, generate clean static HTML
+(no `data-gjs-type`/GrapesJS attributes) for what's actually served to
+storefront visitors. Separate rendering path from the canvas (browser-side
+regex `{{}}` substitution in `themed-block.js`) by design — canvas is for
+editing, EJS is for production output, not duplicated logic.
+
+**Revised approach (superseded the original "one hand-written `.ejs` file per
+type" plan) — "Idea A":** since `content[name].template` (the `{{fieldName}}`
+mustache string already sitting in `acme.json`/`beta.json`) is *the same
+markup* the browser-side regex renderer consumes, hand-writing an equivalent
+`.ejs` file per type would just be retyping identical HTML twice with a
+different placeholder syntax — real duplication for every "template-shape"
+type (`header`, `footer`, `hero`, `newsletter`, `testimonial`). Instead,
+`page-renderer.js` converts `{{field}}` → `<%- field %>` on the fly and
+renders the result as a string (`ejs.render()`), not a file
+(`ejs.renderFile()`) — no hand-written `.ejs` partial exists for these five
+types, `backend/views/components/` is unused for them. (`pricing-cards` is
+still the one exception — see below, it has no `{{}}` template to convert.)
+
+Architecture, as implemented in `backend/services/page-renderer.js`:
+- `adapter(str)` — `str.replace(/\{\{\s*(\w+)\s*\}\}/g, "<%- $1 %>")`. Pure
+  string→string, no I/O, converts the mustache template to EJS syntax.
+- `WRAPPERS` — a small lookup table, one entry per type, holding what
+  `content[name].template` structurally *cannot* carry: the root tag and
+  theme-class prefix (`{ tag: "header", classPrefix: "header" }`). Some
+  types also need `baseClass` — a class that's always present regardless of
+  theme (`newsletter` → `"newsletter-inner"`, `testimonial` →
+  `"testimonial"`) — `header`/`footer`/`hero` have none.
+- Theme is computed inside the generated EJS scriptlet from the saved
+  node's `classes` array — `classes.find(c => c.startsWith(prefix) && c !==
+  baseClass)`, stripped of the prefix, falling back to `"light"`. **Must
+  exclude `baseClass` from the search** — e.g. `newsletter-inner` itself
+  starts with `"newsletter-"`, so without the exclusion `.find()` matches
+  the base class instead of the real theme class and computes a garbage
+  theme (`"inner"`). Not read from a `theme` field directly — GrapesJS's
+  `toJSON()` only serializes trait values that differ from the type's
+  `defaults`, so `theme: "light"` (the default) is typically absent from
+  `.save.json` even though the resulting class is present.
+- `content[name]` can still be either content-shape 1 (plain string, e.g.
+  `footer` — nothing editable beyond theme, no `{{}}` at all) or shape 2
+  (`{ template, ...fields }`) — `renderComponent()` branches on
+  `typeof content[node.type]` once, at the top, and derives both the
+  template string *and* the data object from that single branch (not two
+  separate, inconsistent checks).
+- **Merge-fallback for missing trait fields:** the data passed to
+  `ejs.render()` is `{ ...defaultsFromContent, ...node }`, not `node` alone.
+  Reason: same as the theme problem above — if a store's saved node never
+  had a trait field edited away from its default (e.g. `newsletter`'s
+  `newsHeading` left as `"Welcome"`), that key is entirely *absent* from
+  `.save.json`, not just `undefined`. EJS resolves template variables via
+  `with(locals)` — a genuinely missing key throws `ReferenceError`, unlike
+  the browser's `this.get(key) ?? ""` which silently defaults. Merging in
+  `content[name]`'s own field values (excluding its `template` key) as a
+  base, overridden by whatever the saved node actually has, avoids the
+  crash and mirrors what the field's value would've been if never edited.
+- Data source is otherwise the saved component tree (`.save.json`'s
+  `components` array), not `editor.getHtml()` (carries GrapesJS markup).
+- Container/child components (`pricing-cards`/`pricing-card`) still need a
+  hand-written `pricing-cards.ejs` (not built yet) — its content-shape is
+  `{ cards: [...] }`, no `{{}}` template to run through `adapter()`. Plan:
+  `forEach` over the saved node's own `components` array (the actual saved
+  `pricing-card` children, each already carrying its own flattened fields
+  like `title`/`price`/`image` — same mechanism as any other node, trait or
+  not, since `toJSON()` serializes any attribute that differs from
+  defaults, not just trait-declared ones) + `include()`, mirroring the
+  container's own programmatic child-creation in GrapesJS. `pricing-card`'s
+  own template is planned to move from hardcoded `defaults.content` in
+  `pricing-card.js` into `content["pricing-card"].template` in
+  `acme.json`/`beta.json` (same Idea A treatment as the other five types) —
+  **keep the hardcoded template in `pricing-card.js` as a fallback default**,
+  not delete it, since a store that forgets to declare `content["pricing-card"]`
+  would otherwise silently render empty cards.
+- **Per-store markup variance — resolved, 2026-07-15 decision:** the
+  original plan deferred this to a hypothetical `content[name].templatePath`
+  field (YAGNI, no store needed it). Turns out Idea A already gives this
+  "for free," for the *inner* markup: `content[name].template` is read
+  per-`storeId` via `getContent(storeId)`, so if `beta.json`'s `header.template`
+  differs from `acme.json`'s, the server renders different inner structure
+  per store automatically, no extra mechanism needed. **What's still NOT
+  per-store: the `WRAPPERS` table (root tag / class-prefix / baseClass) is
+  global by `type`, the same for every store.** A store wanting a different
+  root tag or base-class scheme for the same component type isn't
+  supported today. Documented gap, left as-is deliberately — no real store
+  needs it yet; if it comes up, `WRAPPERS`' per-type entries would move
+  into `content[name]` itself (e.g. `content.header.wrapper = {tag,
+  classPrefix}`) rather than staying in a `page-renderer.js`-local table.
+- File extension: `.js` → `.mjs` rename planned across the backend (project
+  is already ESM via `"type": "module"`, this is explicit naming) — not
+  done yet, still `page-renderer.js`.
+
+`backend/services/page-renderer.js` (framework-agnostic, no `req`/`res`):
+- `getData(storeId)` — reads and parses `backend/data/${storeId}.save.json`,
+  returns the full saved-state object.
+- `getContent(storeId)` — reads and parses `backend/data/${storeId}.json`
+  (the manifest+content file, same one `GET /api/content/:storeId` serves),
+  returns just `.content`.
+- `renderComponent(node, content)` — branches on `content[node.type]`'s
+  shape, builds the EJS string (scriptlet + `WRAPPERS`-derived wrapper tag +
+  adapted template), merges fallback field values, calls `ejs.render()`
+  (string-based, not `renderFile`), returns the HTML string.
+- Manual test call at the bottom (`getData("acme")` → `.find(c => c.type
+  === X)` → `getContent("acme")` → `renderComponent(node, content)` →
+  `console.log`) — run with `node services/page-renderer.js` from `backend/`.
+  Verified working for `header`, `footer` (shape 1), `hero`, `testimonial`,
+  `newsletter` (shape 2, incl. `baseClass` cases).
+
+Milestone plan:
+1. ✅ Five template-shape types (`header`, `footer`, `hero`, `testimonial`,
+   `newsletter`) — generic `renderComponent()`, cross-checked against the
+   GrapesJS canvas output for each.
+2. ✅ `pricing-cards`/`pricing-card` — `pricing-card`'s template moved to
+   `content["pricing-card"].template` (hardcoded `defaults.content` in
+   `pricing-card.js` kept as fallback for stores that forget to declare it).
+   No hand-written `pricing-cards.ejs` needed in the end — container
+   handling folded into `renderComponent()` itself as a third branch
+   (`isContainer`, detected the same way `plugin.js` detects content-shape
+   3: an object without a `template` key), which recurses into the node's
+   own saved `components` array and calls `renderComponent()` on each
+   child. This means *any* future container-shape type is handled for
+   free — no new function needed, only a `WRAPPERS` entry, same as any
+   leaf type. Found and fixed along the way: `pricing-cards.js`'s
+   `add-card` command was hardcoding `buttonText: "Choose Plan"` on every
+   new card, silently overriding the content-driven default — removed, so
+   new cards now inherit `buttonText` from `content["pricing-card"]` like
+   everything else.
+3. ✅ Page assembler — `renderPage(storeId)`: `getData` + `getContent`,
+   `Promise.all(data.components.map(node => renderComponent(node, content)))`,
+   `.join("")`. Verified against the full `acme` save — all 7 types render
+   correctly in one pass, no per-type branching in the assembler itself.
+4. Thin `POST /api/render/:storeId` endpoint calling
+   `services/page-renderer.js` — no business logic in the route itself.
+   Not built yet, next session.
+
+**`wrapWithTag(wrapper, node, innerHtml)`** — extracted out of
+`renderComponent` once the wrapper-building logic needed to be reused in
+two places (normal leaf render and the container branch). Deliberately
+plain JS, not an EJS scriptlet embedded in a JS template string — computes
+theme from `node.classes` directly (not from `data`, the content-merged
+object — `classes` is never part of `content[name]`, it's purely
+saved-instance/canvas state, so routing it through the content-fallback
+merge would be conceptually wrong even though the two happen to agree
+today) and returns `<${tag} class="...">${innerHtml}</${tag}>`. Handles the
+themeless case (`pricing-card`/`pricing-cards`, no `classPrefix`) via
+`[baseClass, prefixedTheme].filter(Boolean).join(" ")` rather than a
+separate code path.
+
+**Multi-tenancy rule for `services/`:** every function takes
+`storeId`/store data explicitly as an argument; no module-level state or
+cache not keyed by `storeId` — otherwise one client's data could leak into
+another's response.
 
 ---
 

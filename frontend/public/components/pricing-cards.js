@@ -15,7 +15,6 @@ export default {
           price: "$0/mo",
           desc: "Describe this plan",
           image: "https://picsum.photos/seed/new/280/160",
-          buttonText: "Choose Plan",
         });
       },
     },
@@ -30,7 +29,8 @@ export default {
         { attributes: { class: "fa fa-arrows" }, command: "tlb-move" },
         { attributes: { class: "fa fa-trash" }, command: "tlb-delete" },
         { attributes: { class: "fa fa-plus" }, command: "pricing-cards:add-card"},
-      ]
+      ],
+      droppable: ".pricing-card"
     },
 
     

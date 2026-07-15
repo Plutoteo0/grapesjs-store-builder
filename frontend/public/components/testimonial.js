@@ -35,6 +35,7 @@ export default {
           selector: ".testimonial-quote",
         },
       ],
+      droppable: "false",
     },
 
     
