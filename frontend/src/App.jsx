@@ -8,6 +8,14 @@ const STORE_ID =
   new URLSearchParams(window.location.search).get("store") || "acme";
 const API_BASE = "http://localhost:3001";
 
+function buildPayload(editor) {
+  return {
+    components: editor.getComponents().toJSON(),
+    html: editor.getHtml(),
+    css: editor.getCss()
+  }
+}
+
 export default function App() {
   const [modules, setModules] = useState(null);
   const [cssUrls, setCssUrls] = useState([]);
@@ -72,14 +80,39 @@ export default function App() {
             await fetch(`${API_BASE}/api/save/${STORE_ID}`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                components: editor.getComponents().toJSON(),
-                html: editor.getHtml(),
-                css: editor.getCss(),
-              }),
+              body: JSON.stringify(buildPayload(editor)),
             });
-          }, 1000);
+          }, 3000);
         });
+
+        editor.Commands.add("preview-publish", {
+          async run(editor) {
+            const payload = buildPayload(editor)
+            const [saveRes, renderRes] = await Promise.all([
+              fetch(`${API_BASE}/api/save/${STORE_ID}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+              }),
+              fetch(`${API_BASE}/api/render/${STORE_ID}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ components: payload.components, css: payload.css }),
+              }),
+            ]);
+            if(!saveRes.ok || !renderRes.ok){
+              console.error("FAILED TO PREVIEW", saveRes.status, renderRes.status)
+            }
+            const { html } = await renderRes.json()
+            console.log(html)
+          }
+        });
+        editor.Panels.addButton("options", {
+          id: "preview-publish-btn",
+          className: "fa fa-rocket", 
+          command: "preview-publish",
+          attributes: { title: "Preview & Publish" },
+        })
       }}
       options={{
         height: "100vh",

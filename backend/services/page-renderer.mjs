@@ -21,7 +21,59 @@ async function getContent(storeID) {
     return data.content;
 }
 
-const WRAPPERS = {
+async function getManifest(storeID) {
+    const path = join(__dirname, "..", "data", `${storeID}.json`); 
+    const rawContent = await readFile(path, "utf-8");
+    const data = JSON.parse(rawContent);
+
+    return data.manifest 
+}
+
+function collectUsedTypes(node) {
+    const collected = new Set()
+
+    collected.add(node.type)
+    if (node.components){
+        node.components.forEach(child => {
+            const collectedChilds = collectUsedTypes(child);
+            collectedChilds.forEach(c => collected.add(c))
+        });
+    }
+    return collected
+}
+
+function getAllTypes(nodes) {
+    const allTypes = new Set();
+
+    nodes.forEach((c) => {
+        const collectedTypes = collectUsedTypes(c);
+        collectedTypes.forEach(t => allTypes.add(t));
+    })
+
+    return allTypes
+}
+
+async function buildCssLinks(storeID, data) {
+    const cssUrls = new Array()
+
+    const manifest = await getManifest(storeID);
+    const types = getAllTypes(data.components);
+
+    types.forEach((t) => {
+        const foundUrl = manifest.find(m => m.name === t)
+        if (foundUrl?.cssUrl){
+            cssUrls.push(foundUrl.cssUrl)
+        }
+    })
+
+    const linkUrls = cssUrls.map((cssUrl) => {
+        return `<link rel="stylesheet" href="${cssUrl}">`
+    })
+    linkUrls.push(`<link rel="stylesheet" href="/components.css">`)
+    return linkUrls
+}
+
+const DEFAULT_WRAPPERS = {
     header: { tag: "header", classPrefix: "header"},
     footer: { tag: "footer", classPrefix: "footer" },
     hero: { tag: "section", classPrefix: "hero" },
@@ -55,7 +107,10 @@ function wrapWithTag(wrapper, node, innerHtml) {
 
 async function renderComponent(node, content) {
     const rawContent = content[node.type]
-    const wrapper = WRAPPERS[node.type];
+    const wrapper = rawContent?.wrapper ?? DEFAULT_WRAPPERS[node.type];
+    if (!rawContent?.wrapper){
+        console.warn(`No wrapper in config for ${node.type} using DEFAULT_WRAPPERS`)
+    }
 
     const isContainer = rawContent && typeof rawContent === "object" && !rawContent.template
 
@@ -80,15 +135,27 @@ async function renderComponent(node, content) {
     return wrapWithTag(wrapper, node, innerHtml)
 }
 
-async function renderPage(storeID) {
+export async function renderPage(storeID, payload) {
     const content = await getContent(storeID);
-    const data = await getData(storeID)
+    const data = payload ?? await getData(storeID)
+    const links = (await buildCssLinks(storeID, data)).join("\n")
+    const styleTag = `<style>${data.css}</style>`
 
     const html = (await Promise.all(
         data.components.map(node => renderComponent(node, content))
     )).join("\n")
 
-    return html
-}
+    const htmlDoctype = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+    ${links}
+    ${styleTag}
+    </head>
+    <body>
+    ${html}
+    </body>
+    </html>`
 
-console.log(await renderPage("acme"))
+    return htmlDoctype
+}

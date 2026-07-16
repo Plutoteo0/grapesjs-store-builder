@@ -12,6 +12,7 @@ export default {
       theme: "light",
       buttonText: "",
       headingText: "",
+      subheadingText: "",
       content: "",
       script: function() {
         const button = this.querySelector(".hero-button");
@@ -46,6 +47,13 @@ export default {
           label: "Heading text",
           changeProp: 1,
           selector: ".hero-heading"
+        },
+        {
+          type: "text",
+          name: "subheadingText",
+          label: "Subheading text",
+          changeProp: 1,
+          selector: ".hero-subheading"
         }
       ],
     },

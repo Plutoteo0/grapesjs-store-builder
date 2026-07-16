@@ -37,30 +37,40 @@
   ],
   "content": {
     "hero": {
-      "template": "<div class=\"hero-inner\"><h1 class=\"hero-heading\">{{ headingText }}</h1><p class=\"hero-subheading\">The best products for your business</p><a href=\"#\" class=\"hero-button\">{{ buttonText }}</a></div>",
+      "template": "<div class=\"hero-inner\"><h1 class=\"hero-heading\">{{ headingText }}</h1><p class=\"hero-subheading\">{{ subheadingText }}</p><a href=\"#\" class=\"hero-button\">{{ buttonText }}</a></div>",
       "buttonText": "Get started",
-      "headingText": "Welcome to acme"
+      "headingText": "Welcome to acme",
+      "subheadingText": "The best products for your business",
+      "wrapper": { "tag": "section", "classPrefix": "hero" }
     },
-    "footer": "<div class=\"footer-inner\"><span>© Acme Corp</span></div>",
+    "footer": {
+      "template": "<div class=\"footer-inner\"><span class=\"footer-text\">{{ footerText }}</span></div>",
+      "footerText": "© Acme Corp",
+      "wrapper": { "tag": "footer", "classPrefix": "footer" }
+    },
 
     "header": {
       "template": "<div class=\"header-logo\">{{ logoText }}</div><nav class=\"header-nav\"><a href=\"#\">Home</a><a href=\"#\">About</a><a href=\"#\">Services</a><a href=\"#\">Contact</a></nav><a href=\"#\" class=\"header-cta\">{{ ctaText }}</a>",
       "logoText": "Acme Corp",
-      "ctaText": "Sign In"
+      "ctaText": "Sign In",
+      "wrapper": { "tag": "header", "classPrefix": "header"}
     },
 
 
     "newsletter": {
       "template": "<h2 class=\"newsletter-heading\">{{ newsHeading }}</h2><p class=\"newsletter-subheading\">Get the best deals first</p><div class=\"newsletter-form\"><input type=\"email\" class=\"newsletter-input\" placeholder=\"Enter your email\" /><button class=\"newsletter-button\">Subscribe</button></div>",
-      "newsHeading": "Subscribe to Acme News"
+      "newsHeading": "Subscribe to Acme News",
+      "wrapper": { "tag": "div", "classPrefix": "newsletter", "baseClass": "newsletter-inner" }
     },
 
     "pricing-card": {
       "template": "<img src=\"{{ image }}\" alt=\"{{ title }}\" class=\"pricing-card-image\" /><h3 class=\"pricing-card-title\">{{ title }}</h3><p class=\"pricing-card-price\">{{ price }}</p><p class=\"pricing-card-desc\">{{ desc }}</p><button class=\"pricing-card-button\">{{ buttonText }}</button>",
-      "buttonText": "SERVER TEST"
+      "buttonText": "SERVER TEST",
+      "wrapper": { "tag": "div", "baseClass": "pricing-card" }
     },
 
     "pricing-cards": {
+      "wrapper": { "tag": "div", "baseClass": "pricing-cards pricing-grid-3" },
       "cards": [
         {
           "title": "Starter",
@@ -87,7 +97,8 @@
     },
     "testimonial": {
       "template": "<p class=\"testimonial-quote\">{{ quote }}</p><span class=\"testimonial-author\">- Jane</span>",
-      "quote": "Great product!"
-    } 
+      "quote": "Great product!",
+      "wrapper": { "tag": "div", "classPrefix": "testimonial", "baseClass": "testimonial" }
+    }
   }
 }

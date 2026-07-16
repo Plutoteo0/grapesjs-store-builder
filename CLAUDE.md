@@ -218,7 +218,27 @@ GET  /api/manifest/:storeId  → manifest array from data/*.json
 GET  /api/content/:storeId   → HTML content map { hero: "<h1>...", footer: "..." }
 GET  /api/load/:storeId      → saved editor state (404 if none)
 POST /api/save/:storeId      → saves { components, html, css } to *.save.json
+POST /api/render/:storeId    → { components } in body → { html } out, via services/page-renderer.js
 ```
+
+All five routes are guarded by `isValidStoreId(id)` (`/^[a-z0-9-]+$/`, `server.js`) before
+any `path.join()` — closes the path-traversal gap noted below. `POST /api/save` and
+`POST /api/render` also validate their body shape (`Array.isArray(components)`, etc.)
+before touching disk/render, returning 400 on a bad payload instead of writing garbage
+or crashing.
+
+**`POST /api/render/:storeId` takes `components` in the request body, it does not read
+`*.save.json` off disk** (2026-07-16 decision) — this was a deliberate fix for a race
+condition: the editor's autosave is debounced ~1s, so if a future "Preview/Publish"
+button fired `/save` and a disk-reading `/render` at the same time, `/render` could read
+a stale or not-yet-written save file. Fix: the frontend builds one `components` payload
+per click and sends the *same* object to both `/save` and `/render` — neither endpoint
+depends on the other having already run. `page-renderer.js`'s `renderPage(storeId, payload)`
+reflects this: `payload` is optional, falls back to `getData(storeId)` (disk read) via
+`payload ?? await getData(storeId)` only when no payload is passed — used today only by
+the manual test call at the bottom of the file, not by the render route. `getContent(storeId)`
+(the store's real per-client data/copy) is still always read server-side in both cases —
+that's not something the client sends, so there's no race on it.
 
 ---
 
@@ -379,10 +399,22 @@ child *components*.
    come from a future product catalog). NOT for regular content editing —
    GrapesJS inline-edit already covers that.
 
-Known bugs in current file-storage `backend/server.js`, fix at DB migration
-time (not before): path traversal (`storeId` unvalidated before
-`path.join()`), bare `catch {}` masking all error types, last-write-wins
-race on concurrent saves, no `req.body` validation before writing.
+**Fixed 2026-07-16** (turned out not worth deferring to DB migration): path traversal
+(`storeId` now validated via `isValidStoreId()` before any `path.join()`, all 5 routes)
+and missing `req.body` validation on `POST /api/save` / `POST /api/render`
+(`Array.isArray(components)` etc., 400 on bad shape). Bare `catch {}` still masks all
+error types in the GET routes — left as-is, low risk (read-only, 404 is the right
+response either way) but worth tightening if this grows past a PoC.
+
+**Still open, and reclassified as pre-launch not post-DB-migration (2026-07-16):
+last-write-wins race on concurrent saves.** Originally filed as "fix at DB migration
+time" — re-evaluated because this repo is the actual Uducat.com internship product, not
+a diploma throwaway, so "two editors on the same store overwrite each other with zero
+error" is a real risk once more than one person can touch a store, not a someday
+problem. Needs addressing before a real client launch: either optimistic locking (a
+version/timestamp field in `*.save.json`/`store_pages`, reject a save if someone already
+wrote a newer one) or serializing writes per `storeId`. Not blocking for the current
+render-endpoint work, but should land before this goes in front of an actual client.
 
 ### EJS page renderer (in progress — milestone 1 done, revised architecture 2026-07-15)
 
@@ -408,7 +440,8 @@ still the one exception — see below, it has no `{{}}` template to convert.)
 Architecture, as implemented in `backend/services/page-renderer.js`:
 - `adapter(str)` — `str.replace(/\{\{\s*(\w+)\s*\}\}/g, "<%- $1 %>")`. Pure
   string→string, no I/O, converts the mustache template to EJS syntax.
-- `WRAPPERS` — a small lookup table, one entry per type, holding what
+- `DEFAULT_WRAPPERS` (renamed from `WRAPPERS`, 2026-07-16 — see per-store wrapper
+  section below) — a lookup table, one entry per type, holding what
   `content[name].template` structurally *cannot* carry: the root tag and
   theme-class prefix (`{ tag: "header", classPrefix: "header" }`). Some
   types also need `baseClass` — a class that's always present regardless of
@@ -464,14 +497,38 @@ Architecture, as implemented in `backend/services/page-renderer.js`:
   "for free," for the *inner* markup: `content[name].template` is read
   per-`storeId` via `getContent(storeId)`, so if `beta.json`'s `header.template`
   differs from `acme.json`'s, the server renders different inner structure
-  per store automatically, no extra mechanism needed. **What's still NOT
-  per-store: the `WRAPPERS` table (root tag / class-prefix / baseClass) is
-  global by `type`, the same for every store.** A store wanting a different
-  root tag or base-class scheme for the same component type isn't
-  supported today. Documented gap, left as-is deliberately — no real store
-  needs it yet; if it comes up, `WRAPPERS`' per-type entries would move
-  into `content[name]` itself (e.g. `content.header.wrapper = {tag,
-  classPrefix}`) rather than staying in a `page-renderer.js`-local table.
+  per store automatically, no extra mechanism needed.
+- **Per-store wrapper — the gap above is now closed, 2026-07-16.** `wrapper`
+  (`{ tag, classPrefix, baseClass }`) moved from the global `WRAPPERS` table into
+  `content[name].wrapper` in each store's own `acme.json`/`beta.json`, exactly the
+  move anticipated above (motivated by "what happens at 50 components × 10 clients
+  with different markup needs"). `renderComponent()`:
+  `const wrapper = rawContent?.wrapper ?? DEFAULT_WRAPPERS[node.type]` — `rawContent`
+  can be a plain string (content-shape 1), so `?.` matters here, not just style: a
+  string has no `.wrapper`, evaluates to `undefined`, falls through to the default
+  cleanly, same code path handles all three content shapes with no extra type check.
+  `DEFAULT_WRAPPERS` (the old global table, renamed) is kept as a **fallback only**,
+  same pattern as `pricing-card.js`'s hardcoded template fallback — a store that
+  forgets to declare `wrapper` doesn't crash or render unstyled, it gets the default
+  and a `console.warn(`No wrapper in config for ${node.type}, using DEFAULT_WRAPPERS`)`
+  so the gap is visible in logs instead of silently guessed-at.
+
+  **`acme.json` fully migrated (2026-07-16)** — all 7 types now declare their own
+  `content[name].wrapper`, no warnings left on render. `footer` needed an extra step
+  beyond just adding the key: it was still content-shape 1 (plain string, "fully
+  server-driven, nothing editable"), and a shape-1 value can't hold a `wrapper` key at
+  all — turning it into `{ wrapper: {...} }` with no `template` would've made
+  `isContainer`'s `typeof rawContent === "object" && !rawContent.template` check
+  misfire and treat `footer` as a container. Fix: gave `footer` a real (if trivial)
+  `template` with one placeholder (`{{ footerText }}`), formally promoting it to shape
+  2 — same treatment `header`/`hero`/`newsletter`/`testimonial` already had. Also
+  added the matching Trait to `footer.js` (`footerText`, `changeProp: 1, selector:
+  ".footer-text"`) so the new field is inline-editable in canvas, not just
+  server-driven — required giving the `<span>` its own class (`footer-text`) since
+  `themed-block.js`'s `wireEditableChildren()` matches a trait's `selector` against
+  `child.getClasses()` (a class *on* the element itself), not a descendant CSS
+  selector — same reason `header-logo`/`header-cta` are classes, not tag selectors.
+  `beta.json` not touched — still needs the same per-type migration.
 - File extension: `.js` → `.mjs` rename planned across the backend (project
   is already ESM via `"type": "module"`, this is explicit naming) — not
   done yet, still `page-renderer.js`.
@@ -515,9 +572,99 @@ Milestone plan:
    `Promise.all(data.components.map(node => renderComponent(node, content)))`,
    `.join("")`. Verified against the full `acme` save — all 7 types render
    correctly in one pass, no per-type branching in the assembler itself.
-4. Thin `POST /api/render/:storeId` endpoint calling
-   `services/page-renderer.js` — no business logic in the route itself.
-   Not built yet, next session.
+4. ✅ Thin `POST /api/render/:storeId` endpoint (`server.js`) calling
+   `renderPage(storeId, { components })` — no business logic in the route
+   itself, just `isValidStoreId` + body-shape check + delegate. Takes
+   `components` from the request body rather than reading `*.save.json`
+   (see race-condition note in Backend API section above).
+5. ✅ **CSS in the render output — done 2026-07-16.** `renderPage()` now
+   returns a full `<!DOCTYPE html><html><head>...</head><body>...</body></html>`
+   document, not a bare body string — resolved the open question in favor of
+   "self-contained," consistent with "renders EJS partials → clean HTML."
+   Three sources feed the `<head>`, exactly as scoped:
+   - `components.css` — unconditional `<link>`, always added regardless of
+     what's on the page.
+   - `manifest[i].cssUrl` — per-component `<link>`s, but **only for types
+     actually present on the page**, not the whole manifest blindly. New
+     helper chain in `page-renderer.js`:
+     - `collectUsedTypes(node)` — pure, sync, recursive: walks a single
+       node's full subtree (mirrors `renderComponent`'s own container
+       recursion), returns a `Set` of every `node.type` encountered,
+       including GrapesJS built-ins (`text`, `link`, `textnode`, `image`)
+       that don't exist in the manifest — harmless, they just find no match
+       later and get silently skipped, no special-casing needed.
+     - `getAllTypes(components)` — also pure/sync, calls `collectUsedTypes`
+       once per root node in the page's `components` array and merges all
+       the resulting `Set`s into one. Deliberately takes the array directly,
+       not a `storeId` — doing its own `getData(storeId)` internally would
+       silently re-read the save file from disk even when `renderPage` was
+       given a client `payload`, reintroducing the exact race condition
+       milestone 4 fixed, just relocated. Every function that needs the
+       page's component tree gets it passed in, never re-fetches it itself.
+     - `buildCssLinks(storeId, data)` — the only `async` one of the three
+       (does real I/O via `getManifest`). Looks up each used type in the
+       manifest, collects `cssUrl` where present (`pricing-card` has none —
+       skipped, not an error), maps to `<link rel="stylesheet" href="...">`
+       strings, appends the unconditional `components.css` link last.
+       Reading the manifest fresh per-request here is fine (unlike the
+       component tree) — manifest is server-owned config, never something
+       the client sends, so there's no equivalent race to worry about.
+   - `data.css` (the actual saved CSS text from `editor.getCss()`) — no URL
+     to link to, inlined directly as `<style>${data.css}</style>`.
+   - `getManifest(storeId)` — new, mirrors `getContent(storeId)` exactly,
+     just returns `.manifest` instead of `.content`.
+6. ✅ **Preview/Publish button — done 2026-07-16.** `App.jsx`:
+   - `buildPayload(editor)` extracted to module scope (outside the `App`
+     component, next to `STORE_ID`/`API_BASE`) — a pure function of
+     `editor`, no closure over React state, so both the autosave handler
+     and the button's command can call it and always get the same shape
+     (`{ components, html, css }`).
+   - Autosave debounce increased `1000ms → 3000ms` — safe to relax now that
+     render is no longer tied to every keystroke tick (see milestone 4's
+     reasoning), purely about not spamming `/save` while typing.
+   - `editor.Commands.add("preview-publish", { async run(editor) {...} })`
+     + `editor.Panels.addButton("options", { command: "preview-publish", ... })`
+     — GrapesJS-native pattern, appears in the same top-right icon row as
+     the built-in preview/fullscreen/export-code buttons (the `"options"`
+     panel), not a bespoke React button outside the editor. Deliberately
+     *not* a per-component `toolbar` command (that's `pricing-cards`'
+     `add-card` pattern) — this button is page-global, not tied to a
+     selected component.
+   - Handler: `const payload = buildPayload(editor)`, then
+     `await Promise.all([fetch("/api/save", ...payload), fetch("/api/render", { components: payload.components, css: payload.css })])`
+     — **the actual consumer of the race-condition fix from milestone 4**:
+     one payload, built once, sent to both endpoints in parallel, neither
+     endpoint depends on the other having already run or on disk state
+     being fresh. Checks `saveRes.ok`/`renderRes.ok` explicitly afterward
+     (`fetch` doesn't reject on 4xx/5xx, only on network failure — `Promise.all`
+     alone wouldn't surface a 400/500 as an error). Currently just
+     `console.log(html)`s the result — no file-write/download wired up yet,
+     that's next.
+   - Verified end-to-end in-browser (not just curl): editing in canvas →
+     clicking the button → `console.log`'d HTML matches what a manual
+     `curl -X POST /api/render` produces from the same saved state, byte
+     for byte.
+
+**Found while testing (2026-07-16), not a renderer bug — a data-integrity
+gap worth knowing about:** a stray drag during testing nested `header` as
+a *child* of `hero` in `acme.save.json` instead of leaving it as its own
+root-level entry. GrapesJS's canvas still rendered it fine (canvas renders
+the DOM tree as-is, doesn't care about "semantic" nesting). The production
+renderer silently dropped it: `renderComponent()` for a template-shape type
+(`hero` is shape 2) never looks at `node.components` at all — it builds
+HTML purely from `content[type].template` + EJS, by design, since a
+template component's children are supposed to come only from `{{}}`
+substitution, not arbitrary nested components. So a real component
+accidentally saved as a template-type's child is invisible to
+`renderPage()` even though it's visible in the canvas — no warning, no
+error, just quietly absent from the output. Not something to defend
+against in code right now (this was messy test data from an unusually long
+single session, not a realistic editing accident) — fixed by hand
+(`hero.components.splice` the stray child out, `data.components.unshift`
+it back to root level in `acme.save.json`) — but worth remembering if a
+real store's render ever comes out missing a section that's clearly
+visible in the editor: check whether it's nested somewhere it shouldn't be
+before assuming the renderer itself is broken.
 
 **`wrapWithTag(wrapper, node, innerHtml)`** — extracted out of
 `renderComponent` once the wrapper-building logic needed to be reused in
@@ -573,3 +720,42 @@ DB tables (planned):
 - Storage format decision: currently saving GrapesJS component JSON tree +
   HTML + CSS. Abstract JSON tree approach (`{ type, props, children }`) still
   an option for decoupling storefront rendering from GrapesJS — not resolved.
+
+---
+
+## Next session — pick up here (as of 2026-07-16)
+
+The full editor→render pipeline works end-to-end and is verified in-browser
+(see milestones 1-6 above, all ✅) — clicking Preview/Publish in the `acme`
+editor now produces a complete, self-contained, styled HTML document. What's
+left, roughly in the order it'll probably get tackled:
+
+1. **`beta.json` still not migrated** — plain-string content shapes for
+   `hero`/`newsletter` (original persistence bug still live for it) and no
+   per-store `wrapper` keys at all (everything falls to `DEFAULT_WRAPPERS`
+   with warnings). Same mechanical migration `acme.json` already got.
+2. **Do something with the render result besides `console.log`.** The
+   button's handler has the full HTML in hand and currently just logs it —
+   next natural step is writing it to an actual file (or triggering a
+   browser download) so "Publish" produces something a non-technical person
+   can open without DevTools.
+3. **Race condition on concurrent saves (last-write-wins)** — reclassified
+   pre-launch, not post-DB-migration (see Backend production roadmap
+   section) — still open. Optimistic locking (version/timestamp check) or
+   serialize-per-storeId, whichever gets picked.
+4. **CSS `<link>` paths are still relative** (`/components.css`,
+   `/styles/acme/*.css`) — only resolve correctly when the rendered HTML is
+   served from the same origin that hosts those static files (today, the
+   Vite dev server). Fine for local testing, not fine for an actual
+   standalone storefront — ties into the CDN-migration plan already
+   documented under "Production architecture."
+5. **Clean up test-data debris in `acme.save.json`** — several duplicate
+   "New Plan / $0/mo / SERVER TEST" pricing cards accumulated from repeated
+   `add-card` testing this session; harmless for demoing the pipeline but
+   worth tidying before showing anyone the actual store content.
+6. Backend production roadmap items (DB migration, JWT auth, admin panel)
+   remain unstarted, in the order already agreed there — the render
+   pipeline work didn't change that plan, just made milestone "render" ready
+   for whenever DB migration happens (see the DB-migration-ease discussion
+   in that section — swapping `getData`/`getContent`/`getManifest`'s
+   internals is the only thing that changes).

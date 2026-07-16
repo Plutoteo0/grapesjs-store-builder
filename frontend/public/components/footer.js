@@ -12,6 +12,7 @@ export default {
       name: "Footer",
       theme: "light",
       content: "",
+      footerText: "",
 
       traits: [
         {
@@ -24,6 +25,13 @@ export default {
             { value: "dark", name: "Dark" },
             { value: "social", name: "With Social Media" },
           ],
+        },
+        {
+          type: "text",
+          name: "footerText",
+          label: "Footer text",
+          changeProp: 1,
+          selector: ".footer-text",
         },
       ],
     },
