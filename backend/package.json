@@ -9,6 +9,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "ejs": "^6.0.1",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "sanitize-html": "^2.17.6"
   }
 }

@@ -12,8 +12,8 @@ function buildPayload(editor) {
   return {
     components: editor.getComponents().toJSON(),
     html: editor.getHtml(),
-    css: editor.getCss()
-  }
+    css: editor.getCss(),
+  };
 }
 
 export default function App() {
@@ -87,7 +87,9 @@ export default function App() {
 
         editor.Commands.add("preview-publish", {
           async run(editor) {
-            const payload = buildPayload(editor)
+            const previewWindow = window.open("about:blank", "_blank");
+
+            const payload = buildPayload(editor);
             const [saveRes, renderRes] = await Promise.all([
               fetch(`${API_BASE}/api/save/${STORE_ID}`, {
                 method: "POST",
@@ -97,22 +99,37 @@ export default function App() {
               fetch(`${API_BASE}/api/render/${STORE_ID}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ components: payload.components, css: payload.css }),
+                body: JSON.stringify({
+                  components: payload.components,
+                  css: payload.css,
+                }),
               }),
             ]);
-            if(!saveRes.ok || !renderRes.ok){
-              console.error("FAILED TO PREVIEW", saveRes.status, renderRes.status)
+            if (!saveRes.ok || !renderRes.ok) {
+              console.error(
+                "FAILED TO PREVIEW",
+                saveRes.status,
+                renderRes.status,
+              );
+              previewWindow?.close();
             }
-            const { html } = await renderRes.json()
-            console.log(html)
-          }
+            const { html } = await renderRes.json();
+
+            console.log("previewWindow:", previewWindow);
+            console.log("html length:", html?.length);
+
+            if (previewWindow) {
+              previewWindow.document.write(html);
+              previewWindow.document.close();
+            }
+          },
         });
         editor.Panels.addButton("options", {
           id: "preview-publish-btn",
-          className: "fa fa-rocket", 
+          className: "fa fa-rocket",
           command: "preview-publish",
           attributes: { title: "Preview & Publish" },
-        })
+        });
       }}
       options={{
         height: "100vh",

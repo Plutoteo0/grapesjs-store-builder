@@ -723,39 +723,135 @@ DB tables (planned):
 
 ---
 
-## Next session — pick up here (as of 2026-07-16)
+## Security fixes — 2026-07-22
 
-The full editor→render pipeline works end-to-end and is verified in-browser
-(see milestones 1-6 above, all ✅) — clicking Preview/Publish in the `acme`
-editor now produces a complete, self-contained, styled HTML document. What's
-left, roughly in the order it'll probably get tackled:
+Found via a full-project security pass (unauthenticated render/save endpoints +
+`<%- %>` unescaped EJS output = stored XSS risk on the actual storefront output).
+Both fixed and verified by hand (temporary throwaway test scripts, not committed):
+
+- **Field-level XSS (`{{field}}` → EJS injection):** `content[name]` gained an
+  optional `richTextFields: [...]` array (same config tier as `wrapper` — lives
+  per-store, per-type, next to it in `acme.json`). `adapter(str, richTextFields)`
+  in `page-renderer.mjs` now emits `<%- field %>` (unescaped) only for fields in
+  that list, `<%= field %>` (EJS-escaped) for everything else — safe default,
+  rich HTML only where a component's RTE-editable trait (one with a `selector`)
+  actually needs to preserve `<b>`/`<u>` formatting. Fields listed in
+  `richTextFields` are additionally run through `sanitizeRichField()`
+  (`sanitize-html`, `allowedTags: ["b","i","u","em","strong","br"]`,
+  `allowedAttributes: {}`) before `ejs.render()` — closes the gap that escaping
+  alone can't (a stored `<script>` in a rich field would otherwise survive
+  unescaped). Rule going forward: `richTextFields` for a given type must mirror
+  exactly the traits that have a `selector` in that type's `.js` file — `acme.json`
+  hero's list is `["headingText", "subheadingText", "buttonText"]`, matching all
+  three RTE-selector traits in `hero.js`.
+- **Attribute-injection via `node.classes` → `theme`:** `wrapWithTag()` extracted
+  `theme` from `node.classes` (attacker-controlled — comes straight off the
+  client-submitted `components` tree, since there's still no auth) and spliced it
+  directly into `class="..."` with no validation — a crafted class string like
+  `hero-" onmouseover="alert(1)` broke out of the attribute. Fixed with a
+  `THEME_RE = /^[a-z0-9-]+$/` check; anything that doesn't match falls back to
+  `"light"`, same fallback already used for "no theme class found at all."
+- Still open, not yet done: CORS is wide open (`cors()` with no origin
+  allowlist), `express.json()` has no body-size limit, and
+  `collectUsedTypes`/`renderComponent` recurse into `node.components` with no
+  depth guard — all three are DoS-shaped, all three matter more once this stops
+  being localhost-only. Picking this back up is next session's first item (see
+  below).
+
+## Preview/Publish now actually opens a preview — 2026-07-22
+
+`App.jsx`'s `preview-publish` command opens a real popup window instead of only
+`console.log`-ing the HTML: `window.open("about:blank", "_blank")` **before** the
+`await`s (must happen synchronously in the click handler — after an `await`, the
+browser no longer treats a `window.open()` call as a direct result of user
+activation and silently popup-blocks it), then `previewWindow.document.write(html)`
++ `.document.close()` once the render response comes back. Verified working via a
+throwaway Playwright/headless-Chromium script (no `chromium-cli` available in this
+environment) — the earlier `""` (empty string) argument to `window.open` was
+triggering a real Chrome/Edge quirk where it opens the browser's internal New Tab
+Page (a different origin) instead of `about:blank`, causing a
+`SecurityError` on `.document` access; explicit `"about:blank"` fixed it.
+**Gotcha found while debugging this, worth remembering:** the failure only ever
+reproduced in VSCode's built-in Simple Browser (an Electron webview that sandboxes
+`window.open`/cross-window `document` access differently) — a real external browser
+(and headless Chromium via Playwright) had no problem with it at all. Any future
+`window.open`-based feature in this project should be tested in a real browser,
+not VSCode's Simple Browser, before assuming the app code is broken.
+
+**Still just a "preview," not a real publish** — the rendered HTML only ever lands
+in a popup tab; nothing persists it server-side, and no route serves it to an
+actual storefront visitor. Noted as a real gap, not yet scheduled (see "next up"
+list below).
+
+## Multi-page architecture — decision made 2026-07-22, not yet built
+
+Currently one stor = one page: `acme.save.json` holds a single flat `components`
+array for the whole store, and every route (`/api/save/:storeId`,
+`/api/load/:storeId`, `/api/render/:storeId`) has no notion of "which page."
+Decided this needs solving before it becomes a bigger migration later (a real
+storefront needs home + product + checkout pages at minimum, not one section) —
+picking it up right after tomorrow's security/beta.json items, specifically so the
+DB schema (`store_pages`, still unmigrated) can be designed page-aware from the
+start instead of needing a second migration.
+
+**Impact analysis — what changes and what doesn't, checked before committing to
+this:**
+- `content[name]` config (`template`, `wrapper`, `richTextFields`) — **no change**.
+  It's already scoped per component *type*, not per page — the same `hero.js`
+  renders on every page of a store using the same template/wrapper/rich-field
+  rules. This is why today's security work (`richTextFields`/`adapter`/
+  `sanitizeRichField`/`THEME_RE`) doesn't need to be revisited for multi-page.
+- `getContent(storeId)` / `getManifest(storeId)` in `page-renderer.mjs` —
+  **no change**. Both already read the whole store-level `acme.json`, which isn't
+  page-scoped and shouldn't become so.
+- `getData(storeId)` → becomes `getData(storeId, pageSlug)`; `acme.save.json`
+  becomes one file (or DB row) per `(storeId, pageSlug)` pair, e.g.
+  `acme.home.save.json` / `acme.about.save.json`, rather than one per store.
+- Routes gain a second URL segment: `/api/save/:storeId/:pageSlug` etc. —
+  additive, not a contract break.
+- `App.jsx` gains a `pageSlug` alongside the existing `STORE_ID` (today just
+  `?store=acme` in the query string) — how the editor lets someone switch/create
+  pages is a UX question to design when this is actually picked up, not decided
+  yet.
+- The pending last-write-wins race-condition fix (see Backend production roadmap)
+  just becomes "lock per `(storeId, pageSlug)`" instead of "per `storeId`" —
+  same mechanism, no rework.
+
+Net: this is an additive change to the storage/routing layer, not a rewrite of
+`plugin.js`/`themed-block.js`/the render pipeline — confirmed deliberately before
+agreeing to prioritize it, specifically to make sure it wouldn't undo today's
+security work or force re-touching component-definition files.
+
+---
+
+## Next session — pick up here (as of 2026-07-22)
+
+Plan, in order:
 
 1. **`beta.json` still not migrated** — plain-string content shapes for
    `hero`/`newsletter` (original persistence bug still live for it) and no
-   per-store `wrapper` keys at all (everything falls to `DEFAULT_WRAPPERS`
-   with warnings). Same mechanical migration `acme.json` already got.
-2. **Do something with the render result besides `console.log`.** The
-   button's handler has the full HTML in hand and currently just logs it —
-   next natural step is writing it to an actual file (or triggering a
-   browser download) so "Publish" produces something a non-technical person
-   can open without DevTools.
-3. **Race condition on concurrent saves (last-write-wins)** — reclassified
-   pre-launch, not post-DB-migration (see Backend production roadmap
-   section) — still open. Optimistic locking (version/timestamp check) or
-   serialize-per-storeId, whichever gets picked.
-4. **CSS `<link>` paths are still relative** (`/components.css`,
-   `/styles/acme/*.css`) — only resolve correctly when the rendered HTML is
-   served from the same origin that hosts those static files (today, the
-   Vite dev server). Fine for local testing, not fine for an actual
-   standalone storefront — ties into the CDN-migration plan already
-   documented under "Production architecture."
-5. **Clean up test-data debris in `acme.save.json`** — several duplicate
-   "New Plan / $0/mo / SERVER TEST" pricing cards accumulated from repeated
-   `add-card` testing this session; harmless for demoing the pipeline but
-   worth tidying before showing anyone the actual store content.
-6. Backend production roadmap items (DB migration, JWT auth, admin panel)
-   remain unstarted, in the order already agreed there — the render
-   pipeline work didn't change that plan, just made milestone "render" ready
-   for whenever DB migration happens (see the DB-migration-ease discussion
-   in that section — swapping `getData`/`getContent`/`getManifest`'s
-   internals is the only thing that changes).
+   per-store `wrapper`/`richTextFields` keys at all (everything falls to
+   `DEFAULT_WRAPPERS` with warnings, and rich-text fields get flat-escaped).
+   Same mechanical migration `acme.json` already got.
+2. **CORS allowlist + `express.json()` body-size limit** — both flagged in
+   today's security pass, deliberately deferred to do first thing next session
+   rather than same-day as the XSS/attribute-injection fixes.
+3. **Depth-guard the recursion** in `collectUsedTypes`/`renderComponent` — a
+   deeply-nested attacker-crafted `components` payload can currently stack-
+   overflow the render process; no auth yet means this is reachable by anyone.
+4. **Start the multi-page work** (see decision above) — once 1-3 are done.
+5. **Make Preview actually Publish** — persist the rendered HTML server-side and
+   serve it from a real storefront-facing route, instead of only ever landing
+   in a popup tab.
+6. **Race condition on concurrent saves (last-write-wins)** — still open,
+   pre-launch blocker; folds into the multi-page work (locking becomes
+   per-`(storeId, pageSlug)`).
+7. **CSS `<link>` paths are still relative** (`/components.css`,
+   `/styles/acme/*.css`) — fine for now, ties into the already-planned
+   CDN-migration (versioned CDN URLs solve this as a side effect, per
+   Production architecture section) — not urgent on its own.
+8. **Clean up test-data debris in `acme.save.json`** — low priority, cosmetic.
+9. Backend production roadmap items (DB migration, JWT auth, admin panel)
+   remain unstarted, in the order already agreed there — now additionally
+   informed by the multi-page decision above (design `store_pages` as
+   page-aware from the first migration, not store-only).
