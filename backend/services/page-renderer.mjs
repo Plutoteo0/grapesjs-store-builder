@@ -6,8 +6,13 @@ import sanitizeHtml from "sanitize-html";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-async function getData(storeID) {
-  const path = join(__dirname, "..", "data", `${storeID}.save.json`);
+async function getData(storeID, pageSlug) {
+  const path = join(
+    __dirname,
+    "..",
+    "data",
+    `${storeID}.${pageSlug}.save.json`,
+  );
   const raw = await readFile(path, "utf-8");
 
   const data = JSON.parse(raw);
@@ -30,13 +35,16 @@ async function getManifest(storeID) {
   return data.manifest;
 }
 
-function collectUsedTypes(node) {
+function collectUsedTypes(node, depth = 0) {
+  if (depth > 20) {
+    throw new Error(`Component tree too deep`);
+  }
   const collected = new Set();
 
   collected.add(node.type);
   if (node.components) {
     node.components.forEach((child) => {
-      const collectedChilds = collectUsedTypes(child);
+      const collectedChilds = collectUsedTypes(child, depth + 1);
       collectedChilds.forEach((c) => collected.add(c));
     });
   }
@@ -132,7 +140,10 @@ function wrapWithTag(wrapper, node, innerHtml) {
   return `<${wrapper.tag} class="${classAttr}">${innerHtml}</${wrapper.tag}>`;
 }
 
-async function renderComponent(node, content) {
+async function renderComponent(node, content, depth = 0) {
+  if (depth > 20) {
+    throw new Error(`Component tree too deep`);
+  }
   const rawContent = content[node.type];
   const wrapper = rawContent?.wrapper ?? DEFAULT_WRAPPERS[node.type];
   if (!rawContent?.wrapper) {
@@ -147,7 +158,9 @@ async function renderComponent(node, content) {
   if (isContainer) {
     const childrenHtml = (
       await Promise.all(
-        node.components.map((child) => renderComponent(child, content)),
+        node.components.map((child) =>
+          renderComponent(child, content, depth + 1),
+        ),
       )
     ).join("");
     return wrapWithTag(wrapper, node, childrenHtml);
@@ -173,9 +186,9 @@ async function renderComponent(node, content) {
   return wrapWithTag(wrapper, node, innerHtml);
 }
 
-export async function renderPage(storeID, payload) {
+export async function renderPage(storeID, pageSlug, payload) {
   const content = await getContent(storeID);
-  const data = payload ?? (await getData(storeID));
+  const data = payload ?? (await getData(storeID, pageSlug));
   const links = (await buildCssLinks(storeID, data)).join("\n");
   const styleTag = `<style>${data.css}</style>`;
 

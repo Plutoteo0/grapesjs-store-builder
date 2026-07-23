@@ -7,6 +7,8 @@ import myComponentsPlugin from "./plugin";
 const STORE_ID =
   new URLSearchParams(window.location.search).get("store") || "acme";
 const API_BASE = "http://localhost:3001";
+const pageSlug =
+  new URLSearchParams(window.location.search).get("pageSlug") || "home";
 
 function buildPayload(editor) {
   return {
@@ -63,7 +65,9 @@ export default function App() {
         window.editor = editor;
 
         // Restore saved state if exists
-        const saved = await fetch(`${API_BASE}/api/load/${STORE_ID}`)
+        const saved = await fetch(
+          `${API_BASE}/api/load/${STORE_ID}/${pageSlug}`,
+        )
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null);
 
@@ -77,7 +81,7 @@ export default function App() {
         editor.on("update", () => {
           clearTimeout(debounceTimer);
           debounceTimer = setTimeout(async () => {
-            await fetch(`${API_BASE}/api/save/${STORE_ID}`, {
+            await fetch(`${API_BASE}/api/save/${STORE_ID}/${pageSlug}`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(buildPayload(editor)),
@@ -91,12 +95,12 @@ export default function App() {
 
             const payload = buildPayload(editor);
             const [saveRes, renderRes] = await Promise.all([
-              fetch(`${API_BASE}/api/save/${STORE_ID}`, {
+              fetch(`${API_BASE}/api/save/${STORE_ID}/${pageSlug}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),
               }),
-              fetch(`${API_BASE}/api/render/${STORE_ID}`, {
+              fetch(`${API_BASE}/api/render/${STORE_ID}/${pageSlug}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -124,11 +128,40 @@ export default function App() {
             }
           },
         });
+        editor.Commands.add("create-page", {
+          async run(editor) {
+            const slug = window.prompt("Enter name for new page: ");
+
+            if (!slug) return;
+
+            const createPage = await fetch(
+              `${API_BASE}/api/pages/${STORE_ID}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  slug: slug,
+                }),
+              },
+            );
+            if (!createPage.ok) {
+              window.alert("Incorrect page name");
+              return;
+            }
+            window.alert(`Page was created to navigate use ?pageSlug=${slug}`);
+          },
+        });
         editor.Panels.addButton("options", {
           id: "preview-publish-btn",
           className: "fa fa-rocket",
           command: "preview-publish",
           attributes: { title: "Preview & Publish" },
+        });
+        editor.Panels.addButton("options", {
+          id: "create-page-btn",
+          className: "fa fa-file",
+          command: "create-page",
+          attributes: { title: "Create new page" },
         });
       }}
       options={{

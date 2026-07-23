@@ -167,13 +167,14 @@ rendered component. For each descendant:
 - If a whitelisted `selector` matches nothing after a render, `renderContent()` logs a
   `console.warn` (dead/misspelled selector) instead of failing silently.
 
-**Known gap:** stores still on the plain-string content shape for a component that *also*
-declares inline-editable traits (e.g. `beta.json`'s `hero`/`newsletter`, never migrated to
-the template shape) will hit the original persistence bug again for that field — the
-canvas edit looks like it works, but the next `renderContent()` re-derives from the static
-string and discards it, because there's no `{{fieldName}}` placeholder tying the Trait to
-the DOM in the first place. Only `acme.json` has been migrated to the template shape for
-hero/newsletter/pricing-cards so far.
+**Known gap (closed 2026-07-23):** a store still on the plain-string content shape for a
+component that *also* declares inline-editable traits would hit the original persistence
+bug again for that field — the canvas edit looks like it works, but the next
+`renderContent()` re-derives from the static string and discards it, because there's no
+`{{fieldName}}` placeholder tying the Trait to the DOM in the first place. Both
+`acme.json` and `beta.json` are now migrated to the template shape for
+hero/footer/header/newsletter/pricing-cards — no store left on the plain-string shape
+for an editable field.
 
 ### Interactive behavior in components (`script` / `script-props`)
 
@@ -331,8 +332,9 @@ child *components*.
 - **A store's `content[name]` must use the `{ template, ...fields }` shape (not a plain
   string) for any field that's also declared as an inline-editable Trait** — otherwise
   there's no `{{fieldName}}` placeholder in the rendered HTML for the Trait to actually
-  drive, and edits get silently discarded on the next render. `acme.json` is migrated for
-  hero/newsletter/pricing-cards; `beta.json` is not (see persistence-bug section above).
+  drive, and edits get silently discarded on the next render. Both `acme.json` and
+  `beta.json` are migrated for hero/footer/header/newsletter/pricing-cards (see
+  persistence-bug section above).
 - **`rte:disable` fires directly on the child component's model, with no arguments** —
   not on `editor`/`em`, despite what GrapesJS's own doc comment for the event implies.
   Listen with `child.on("rte:disable", ...)`, not `this.em.on(...)`.
@@ -528,7 +530,7 @@ Architecture, as implemented in `backend/services/page-renderer.js`:
   `themed-block.js`'s `wireEditableChildren()` matches a trait's `selector` against
   `child.getClasses()` (a class *on* the element itself), not a descendant CSS
   selector — same reason `header-logo`/`header-cta` are classes, not tag selectors.
-  `beta.json` not touched — still needs the same per-type migration.
+  `beta.json` migrated the same way on 2026-07-23 (see the dedicated section above).
 - File extension: `.js` → `.mjs` rename planned across the backend (project
   is already ESM via `"type": "module"`, this is explicit naming) — not
   done yet, still `page-renderer.js`.
@@ -783,75 +785,182 @@ in a popup tab; nothing persists it server-side, and no route serves it to an
 actual storefront visitor. Noted as a real gap, not yet scheduled (see "next up"
 list below).
 
-## Multi-page architecture — decision made 2026-07-22, not yet built
+## Multi-page architecture — decision made 2026-07-22, storage/routing built 2026-07-23
 
-Currently one stor = one page: `acme.save.json` holds a single flat `components`
+Previously one store = one page: `acme.save.json` held a single flat `components`
 array for the whole store, and every route (`/api/save/:storeId`,
-`/api/load/:storeId`, `/api/render/:storeId`) has no notion of "which page."
-Decided this needs solving before it becomes a bigger migration later (a real
+`/api/load/:storeId`, `/api/render/:storeId`) had no notion of "which page."
+Decided this needed solving before it became a bigger migration later (a real
 storefront needs home + product + checkout pages at minimum, not one section) —
-picking it up right after tomorrow's security/beta.json items, specifically so the
-DB schema (`store_pages`, still unmigrated) can be designed page-aware from the
-start instead of needing a second migration.
+so the DB schema (`store_pages`, still unmigrated) can be designed page-aware
+from the start instead of needing a second migration.
 
-**Impact analysis — what changes and what doesn't, checked before committing to
-this:**
-- `content[name]` config (`template`, `wrapper`, `richTextFields`) — **no change**.
-  It's already scoped per component *type*, not per page — the same `hero.js`
-  renders on every page of a store using the same template/wrapper/rich-field
-  rules. This is why today's security work (`richTextFields`/`adapter`/
-  `sanitizeRichField`/`THEME_RE`) doesn't need to be revisited for multi-page.
+**Deliberately scoped out of this pass, tracked as its own follow-up:** linking
+between pages (a Trait on a button/`<a>` that points at another page of the
+same store, rendered as `href="/store/:storeId/:pageSlug"`). Everything below
+is storage/routing/creation only — no component yet knows another page exists.
+
+**Impact analysis (confirmed correct in practice) — what changed and what didn't:**
+- `content[name]` config (`template`, `wrapper`, `richTextFields`) — **no change**,
+  as predicted. Scoped per component *type*, not per page, so today's security
+  work didn't need revisiting.
 - `getContent(storeId)` / `getManifest(storeId)` in `page-renderer.mjs` —
-  **no change**. Both already read the whole store-level `acme.json`, which isn't
-  page-scoped and shouldn't become so.
-- `getData(storeId)` → becomes `getData(storeId, pageSlug)`; `acme.save.json`
-  becomes one file (or DB row) per `(storeId, pageSlug)` pair, e.g.
-  `acme.home.save.json` / `acme.about.save.json`, rather than one per store.
-- Routes gain a second URL segment: `/api/save/:storeId/:pageSlug` etc. —
-  additive, not a contract break.
-- `App.jsx` gains a `pageSlug` alongside the existing `STORE_ID` (today just
-  `?store=acme` in the query string) — how the editor lets someone switch/create
-  pages is a UX question to design when this is actually picked up, not decided
-  yet.
+  **no change**, as predicted.
+- `getData(storeId)` → `getData(storeId, pageSlug)`, reading
+  `${storeId}.${pageSlug}.save.json` instead of `${storeId}.save.json`. Existing
+  `acme.save.json` manually renamed to `acme.home.save.json` (`home` established
+  as the convention for a store's default/first page).
+- `renderPage(storeId, payload)` → **`renderPage(storeId, pageSlug, payload)`**
+  — `pageSlug` deliberately placed *before* `payload`, not after. Reasoning: the
+  publish route (`GET /store/:storeId/:pageSlug`, below) needs to call this with
+  `payload` omitted entirely, relying on `payload ?? (await getData(...))` to
+  fall back to a disk read. A bug surfaced here during review: an earlier attempt
+  passed `{}` as a placeholder for the omitted middle argument — `{}` is not
+  `null`/`undefined`, so `??` never falls through to `getData`, and rendering
+  crashes on `data.components` being absent. Putting the truly-optional argument
+  *last* means the disk-read call site is just `renderPage(storeId, pageSlug)`,
+  no placeholder needed, and the mistake becomes structurally hard to make again.
+- Routes gained a second URL segment — `/api/save/:storeId/:pageSlug`,
+  `/api/load/:storeId/:pageSlug`, `/api/render/:storeId/:pageSlug` — additive,
+  not a contract break. `/api/manifest/:storeId` and `/api/content/:storeId`
+  stayed store-only (unchanged), matching the "not page-scoped" call above.
+- **New: `GET /store/:storeId/:pageSlug`** — the actual publish-facing route.
+  Calls `renderPage(storeId, pageSlug)` (no payload → reads disk) and responds
+  with `res.set("Content-Type", "text/html").send(html)`, not JSON — a real
+  visitor (or a plain browser tab) hitting this URL gets a normal HTML page,
+  no client-side JS involved. No separate draft/published state was introduced
+  (deliberate choice, see below) — this route always reflects whatever the
+  autosave most recently wrote to disk.
+- **New: `POST /api/pages/:storeId`** — creates a new empty page. Takes
+  `{ slug }` in the request body (not the URL — the whole point is the page
+  doesn't exist yet, so it can't be a route param the way `:pageSlug` is
+  elsewhere). Validates `storeId` and `slug` (`typeof slug !== "string"` guards
+  against `regex.test(undefined)` coercing to the string `"undefined"` and
+  passing validation — a real bug hit during review), checks the target file
+  doesn't already exist via `access()` (404/reject = safe to create, resolve =
+  409 Conflict), writes `{ components: [], html: "", css: "" }` — genuinely
+  empty, no default header/footer scaffolding (deliberate: easier to add than
+  to remove, per the user's call).
+- **Draft vs. published — decided to keep it simple for now.** No separate
+  `*.published.json` file; the publish route reads the same file the editor's
+  autosave writes to, live. Means a real visitor could see a change seconds
+  after it's typed, with no explicit "go live" gate. Accepted for this stage
+  (single editor, no real visitors yet) — and confirmed *not* a costly decision
+  to revisit later: adding a separate published-copy file is a one-line change
+  to which file the `GET` route reads, not a rework of the render pipeline.
+  Rolls into the same "draft/published history" open question already tracked
+  under the DB migration roadmap.
+- `App.jsx`: `pageSlug` read from `?pageSlug=` in the query string (parallel to
+  `STORE_ID`'s `?store=`, defaulting to `"home"`), threaded into all three
+  fetch calls that need it (`/api/load`, `/api/save`, `/api/render`).
+  `buildPayload()` itself unchanged — `pageSlug` is routing information, not
+  part of the saved payload body, same reasoning as `storeId` never being in
+  the body either.
+- **New "Create Page" button** (`editor.Commands.add("create-page", ...)`,
+  paired with an `options`-panel button next to `preview-publish`) —
+  `window.prompt` for a slug (no full form yet, matches the existing
+  `preview-publish` button's level of polish), `POST /api/pages/:storeId`,
+  `alert`s the result either way (error message on failure, or the `?pageSlug=`
+  URL to open the new page on success — no in-app page switcher yet, that's a
+  separate future UX piece, not blocking here).
 - The pending last-write-wins race-condition fix (see Backend production roadmap)
-  just becomes "lock per `(storeId, pageSlug)`" instead of "per `storeId`" —
-  same mechanism, no rework.
+  now naturally reads as "lock per `(storeId, pageSlug)`" instead of "per
+  `storeId`" — same mechanism, no rework, as predicted.
 
-Net: this is an additive change to the storage/routing layer, not a rewrite of
-`plugin.js`/`themed-block.js`/the render pipeline — confirmed deliberately before
-agreeing to prioritize it, specifically to make sure it wouldn't undo today's
-security work or force re-touching component-definition files.
+**Verified end-to-end (2026-07-23), not just read through:** a throwaway
+Playwright script drove the real running app — clicked the Create Page button,
+answered the `prompt` dialog, confirmed the `alert` text interpolated the
+actual slug (not a literal `${...}`), confirmed `acme.<slug>.save.json`
+appeared on disk with the empty shape, then loaded `?pageSlug=<slug>` in a
+fresh page load and confirmed the canvas rendered with **zero** component
+elements (genuinely empty, not accidentally inheriting `home`'s content) and no
+console errors. Test script and generated data file deleted after verification,
+not committed.
+
+Net: this was an additive change to the storage/routing layer, not a rewrite of
+`plugin.js`/`themed-block.js`/the render pipeline — confirmed both in the
+original impact analysis and again in practice once built.
 
 ---
 
-## Next session — pick up here (as of 2026-07-22)
+## `beta.json` migrated — 2026-07-23
+
+Same mechanical migration `acme.json` got on 2026-07-16, applied to `beta.json`:
+all five template-shape types (`hero`, `footer`, `header`, `newsletter`) plus
+`pricing-card`/`pricing-cards` now use the `{ template, ...fields, wrapper }` /
+`{ wrapper, cards: [...] }` shapes instead of plain strings — the original
+persistence bug (canvas edits silently discarded on reload) no longer applies to
+beta's `hero`/`newsletter`. Deliberately **no `richTextFields`** for beta (user's
+call: no rich-text formatting needed for this store's fields yet) — everything
+renders through the safe `<%= %>` (escaped) path by default, which is fine since
+none of beta's fields need `<b>`/`<u>` preserved.
+
+Also fixed a real bug found along the way, not just a migration gap: beta's
+`manifest` was missing a `pricing-card` entry entirely (only `pricing-cards` was
+listed). Since `pricing-cards.js`'s `init()` creates children with
+`type: "pricing-card"`, and `plugin.js` only calls `editor.Components.addType()`
+for types present in the manifest, that type was never registered for beta —
+canvas would've silently fallen back to a generic/default component type for
+every card. Added `{ "name": "pricing-card", "url": "/components/pricing-card.js" }`
+to the manifest, no `cssUrl` (same as acme — pricing-card has no separate CSS file).
+
+Verified with a throwaway `tmp-beta-test.mjs` calling `renderPage("beta", { components, css: "" })`
+with a synthetic saved-state payload covering all 5 types plus an overridden
+pricing-card — confirmed edited fields render, and fields left at their default
+(never touched in the fake "save") correctly fall back to `content[name]`'s
+own values via the existing merge-fallback, exactly like acme. Script deleted
+after verification, not committed.
+
+## Next session — pick up here (as of 2026-07-23, end of day)
+
+Done today: CORS allowlist, `express.json()` body-size limit, depth-guard on
+the recursive render/type-collection functions, `beta.json` migration, and the
+multi-page storage/routing/create-page work (see dedicated sections above).
 
 Plan, in order:
 
-1. **`beta.json` still not migrated** — plain-string content shapes for
-   `hero`/`newsletter` (original persistence bug still live for it) and no
-   per-store `wrapper`/`richTextFields` keys at all (everything falls to
-   `DEFAULT_WRAPPERS` with warnings, and rich-text fields get flat-escaped).
-   Same mechanical migration `acme.json` already got.
-2. **CORS allowlist + `express.json()` body-size limit** — both flagged in
-   today's security pass, deliberately deferred to do first thing next session
-   rather than same-day as the XSS/attribute-injection fixes.
-3. **Depth-guard the recursion** in `collectUsedTypes`/`renderComponent` — a
-   deeply-nested attacker-crafted `components` payload can currently stack-
-   overflow the render process; no auth yet means this is reachable by anyone.
-4. **Start the multi-page work** (see decision above) — once 1-3 are done.
-5. **Make Preview actually Publish** — persist the rendered HTML server-side and
-   serve it from a real storefront-facing route, instead of only ever landing
-   in a popup tab.
-6. **Race condition on concurrent saves (last-write-wins)** — still open,
-   pre-launch blocker; folds into the multi-page work (locking becomes
-   per-`(storeId, pageSlug)`).
-7. **CSS `<link>` paths are still relative** (`/components.css`,
+1. **Links between pages** (deliberately scoped out of today's multi-page work
+   — see note above). **Decided 2026-07-23: a Trait-based dropdown listing the
+   store's existing pages** (not a free-text slug field — validated choice
+   over "might typo a page that doesn't exist"). Concrete first step, in order:
+   - **New `GET /api/pages/:storeId`** — no page list is stored anywhere today,
+     pages only exist as `${storeId}.${pageSlug}.save.json` files on disk. This
+     endpoint reads the `data/` directory, filters filenames matching
+     `^${storeId}\.(.+)\.save\.json$`, extracts each `pageSlug` via that
+     pattern, returns the list. Start here — no dependency on anything else,
+     easiest to verify in isolation.
+   - Then: a `type: "select"` Trait (`name: "linkTo"`) on the components that
+     need it (likely `header`'s nav links, `hero`'s button) — open problem to
+     solve when this is picked up: GrapesJS `select` Traits normally have
+     *static* options fixed at type-registration time, but this needs
+     *dynamic* options (the page list can change) — needs either a custom
+     Trait type or refreshing the options live (e.g. on trait-panel open),
+     not decided yet.
+   - Then: wire `linkTo` into the render pipeline (`renderComponent`/
+     `wrapWithTag` in `page-renderer.mjs` don't know about it yet) so the
+     saved `pageSlug` value becomes a real `href="/store/:storeId/:pageSlug"`
+     in the EJS output.
+2. **Make Preview actually Publish** — largely superseded by today's
+   `GET /store/:storeId/:pageSlug` route, which already *is* a real
+   storefront-facing URL. What's left: decide whether the popup-preview button
+   should now just open that real URL in a new tab instead of
+   `document.write`-ing a fetched copy (simpler, and it's testing the actual
+   served page rather than a client-rendered stand-in) — a small follow-up,
+   not a new subsystem.
+3. **Race condition on concurrent saves (last-write-wins)** — still open,
+   pre-launch blocker; now concretely "lock per `(storeId, pageSlug)`" per the
+   multi-page work above.
+4. **CSS `<link>` paths are still relative** (`/components.css`,
    `/styles/acme/*.css`) — fine for now, ties into the already-planned
    CDN-migration (versioned CDN URLs solve this as a side effect, per
    Production architecture section) — not urgent on its own.
-8. **Clean up test-data debris in `acme.save.json`** — low priority, cosmetic.
-9. Backend production roadmap items (DB migration, JWT auth, admin panel)
-   remain unstarted, in the order already agreed there — now additionally
-   informed by the multi-page decision above (design `store_pages` as
-   page-aware from the first migration, not store-only).
+5. **Clean up test-data debris in `acme.save.json`** — low priority, cosmetic.
+6. **No in-app page switcher/list yet** — creating a page requires knowing its
+   slug and manually editing the `?pageSlug=` query string to open it; no UI
+   lists a store's existing pages. Worth doing before this feels like a real
+   multi-page editor, not blocking for now.
+7. Backend production roadmap items (DB migration, JWT auth, admin panel)
+   remain unstarted, in the order already agreed there — informed by the
+   multi-page work above (`store_pages` should be designed page-aware from the
+   first migration, matching what `${storeId}.${pageSlug}.save.json` already
+   does on disk).

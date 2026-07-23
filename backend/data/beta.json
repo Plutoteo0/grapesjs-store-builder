@@ -21,17 +21,71 @@
       "cssUrl": "/styles/beta/newsletter.1.0.0.css"
     },
     {
+      "name": "pricing-card",
+      "url": "/components/pricing-card.js"
+    },
+    {
       "name": "pricing-cards",
       "url": "/components/pricing-cards.js",
       "cssUrl": "/styles/beta/pricing-cards.1.0.0.css"
     }
   ],
   "content": {
-    "hero": "<h1 class=\"hero-heading\">Welcome to Beta Store</h1><p class=\"hero-subheading\">Premium products for your team</p><button class=\"hero-button\">Get Started</button>",
-    "footer": "<div class=\"footer-inner\"><span>© Beta Inc</span></div>",
-    "header": "<div class=\"header-logo\">Beta Inc</div><nav class=\"header-nav\"><a href=\"#\">Home</a><a href=\"#\">Products</a><a href=\"#\">Contact</a></nav><button class=\"header-cta\">Sign Up</button>",
-    "newsletter": "<div class=\"newsletter-inner\"><h2 class=\"newsletter-heading\">Stay updated with Beta</h2><p class=\"newsletter-subheading\">Get the latest news and offers</p><div class=\"newsletter-form\"><input type=\"email\" class=\"newsletter-input\" placeholder=\"Enter your email\" /><button class=\"newsletter-button\">Subscribe</button></div></div>",
+    "hero": {
+      "template": "<div class=\"hero-inner\"><h1 class=\"hero-heading\">{{ headingText }}</h1><p class=\"hero-subheading\">{{ subheadingText }}</p><button class=\"hero-button\">{{ buttonText }}</button></div>",
+      "headingText": "Welcome to Beta Store",
+      "subheadingText": "Premium products for your team",
+      "buttonText": "Get Started",
+      "wrapper": { "tag": "section", "classPrefix": "hero" }
+    },
+    "footer": {
+      "template": "<div class=\"footer-inner\"><span class=\"footer-text\">{{ footerText }}</span></div>",
+      "footerText": "© Beta Inc",
+      "wrapper": { "tag": "footer", "classPrefix": "footer" }
+    },
+    "header": {
+      "template": "<div class=\"header-logo\">{{ logoText }}</div><nav class=\"header-nav\"><a href=\"#\">Home</a><a href=\"#\">Products</a><a href=\"#\">Contact</a></nav><button class=\"header-cta\">{{ ctaText }}</button>",
+      "logoText": "Beta Inc",
+      "ctaText": "Sign Up",
+      "wrapper": { "tag": "header", "classPrefix": "header" }
+    },
+    "newsletter": {
+      "template": "<h2 class=\"newsletter-heading\">{{ newsHeading }}</h2><p class=\"newsletter-subheading\">Get the latest news and offers</p><div class=\"newsletter-form\"><input type=\"email\" class=\"newsletter-input\" placeholder=\"Enter your email\" /><button class=\"newsletter-button\">Subscribe</button></div>",
+      "newsHeading": "Stay updated with Beta",
+      "wrapper": { "tag": "div", "classPrefix": "newsletter", "baseClass": "newsletter-inner" }
+    },
 
-    "pricing-cards": "<div class=\"pricing-cards-inner\"><div class=\"pricing-card\"><img src=\"https://picsum.photos/seed/basic/280/160\" alt=\"Basic\" class=\"pricing-card-image\" /><h3 class=\"pricing-card-title\">Basic</h3><p class=\"pricing-card-price\">$15/mo</p><p class=\"pricing-card-desc\">Everything you need to get started.</p><button class=\"pricing-card-button\">Choose Plan</button></div><div class=\"pricing-card\"><img src=\"https://picsum.photos/seed/team/280/160\" alt=\"Team\" class=\"pricing-card-image\" /><h3 class=\"pricing-card-title\">Team</h3><p class=\"pricing-card-price\">$45/mo</p><p class=\"pricing-card-desc\">Built for teams that ship together.</p><button class=\"pricing-card-button\">Choose Plan</button></div><div class=\"pricing-card\"><img src=\"https://picsum.photos/seed/scale/280/160\" alt=\"Scale\" class=\"pricing-card-image\" /><h3 class=\"pricing-card-title\">Scale</h3><p class=\"pricing-card-price\">$89/mo</p><p class=\"pricing-card-desc\">For companies scaling fast.</p><button class=\"pricing-card-button\">Choose Plan</button></div></div>"
+    "pricing-card": {
+      "template": "<img src=\"{{ image }}\" alt=\"{{ title }}\" class=\"pricing-card-image\" /><h3 class=\"pricing-card-title\">{{ title }}</h3><p class=\"pricing-card-price\">{{ price }}</p><p class=\"pricing-card-desc\">{{ desc }}</p><button class=\"pricing-card-button\">{{ buttonText }}</button>",
+      "buttonText": "Choose Plan",
+      "wrapper": { "tag": "div", "baseClass": "pricing-card" }
+    },
+
+    "pricing-cards": {
+      "wrapper": { "tag": "div", "baseClass": "pricing-cards-inner" },
+      "cards": [
+        {
+          "title": "Basic",
+          "price": "$15/mo",
+          "desc": "Everything you need to get started.",
+          "image": "https://picsum.photos/seed/basic/280/160",
+          "buttonText": "Choose Plan"
+        },
+        {
+          "title": "Team",
+          "price": "$45/mo",
+          "desc": "Built for teams that ship together.",
+          "image": "https://picsum.photos/seed/team/280/160",
+          "buttonText": "Choose Plan"
+        },
+        {
+          "title": "Scale",
+          "price": "$89/mo",
+          "desc": "For companies scaling fast.",
+          "image": "https://picsum.photos/seed/scale/280/160",
+          "buttonText": "Choose Plan"
+        }
+      ]
+    }
   }
 }
