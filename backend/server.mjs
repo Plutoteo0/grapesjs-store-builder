@@ -4,6 +4,7 @@ import { readFile, writeFile, access } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { renderPage } from "./services/page-renderer.mjs";
+import { readdir } from "fs/promises";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -169,6 +170,24 @@ app.post("/api/pages/:storeId", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: "Something went wrong" });
   }
+});
+
+app.get("/api/pages/:storeId", async (req, res) => {
+  const storeId = req.params.storeId;
+  if (!isValidStoreId(storeId)) {
+    return res.status(400).json({ error: "Bad storeId" });
+  }
+  const FILE_REG = new RegExp(`^${storeId}\.(.+)\.save\.json$`);
+  const allFiles = await readdir(join(__dirname, "data"));
+  if (allFiles.length === 0) {
+    return res.json({ slugs: [] });
+  }
+  const foundSlugs = allFiles.map((file) => {
+    const result = FILE_REG.exec(file);
+    return result ? result[1] : null;
+  });
+  const slugs = foundSlugs.filter((s) => s !== null);
+  return res.status(200).json({ slugs: slugs });
 });
 
 app.listen(3001, () => {

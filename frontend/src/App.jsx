@@ -22,6 +22,7 @@ export default function App() {
   const [modules, setModules] = useState(null);
   const [cssUrls, setCssUrls] = useState([]);
   const [content, setContent] = useState(null);
+  const [pages, setPages] = useState([]);
 
   useEffect(() => {
     async function importFromUrl(url) {
@@ -54,130 +55,164 @@ export default function App() {
       setModules(loaded);
     }
     loadComponents();
+
+    async function loadPages() {
+      const res = await fetch(`${API_BASE}/api/pages/${STORE_ID}`);
+      const data = await res.json();
+      setPages(data.slugs);
+    }
+    loadPages();
   }, []);
+
+  function handlePageChange(newSlug) {
+    const params = new URLSearchParams(window.location.search);
+    params.set("pageSlug", newSlug);
+    window.location.search = params.toString();
+  }
 
   if (!modules) return <div>Loading components...</div>;
 
   return (
-    <GjsEditor
-      grapesjs={grapesjs}
-      onEditor={async (editor) => {
-        window.editor = editor;
+    <div style={{ position: "relative" }}>
+      <GjsEditor
+        grapesjs={grapesjs}
+        onEditor={async (editor) => {
+          window.editor = editor;
 
-        // Restore saved state if exists
-        const saved = await fetch(
-          `${API_BASE}/api/load/${STORE_ID}/${pageSlug}`,
-        )
-          .then((r) => (r.ok ? r.json() : null))
-          .catch(() => null);
+          const saved = await fetch(
+            `${API_BASE}/api/load/${STORE_ID}/${pageSlug}`,
+          )
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null);
 
-        if (saved?.components) {
-          editor.setComponents(saved.components);
-          editor.setStyle(saved.css || "");
-        }
+          if (saved?.components) {
+            editor.setComponents(saved.components);
+            editor.setStyle(saved.css || "");
+          }
 
-        // Save on every change
-        let debounceTimer;
-        editor.on("update", () => {
-          clearTimeout(debounceTimer);
-          debounceTimer = setTimeout(async () => {
-            await fetch(`${API_BASE}/api/save/${STORE_ID}/${pageSlug}`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(buildPayload(editor)),
-            });
-          }, 3000);
-        });
-
-        editor.Commands.add("preview-publish", {
-          async run(editor) {
-            const previewWindow = window.open("about:blank", "_blank");
-
-            const payload = buildPayload(editor);
-            const [saveRes, renderRes] = await Promise.all([
-              fetch(`${API_BASE}/api/save/${STORE_ID}/${pageSlug}`, {
+          let debounceTimer;
+          editor.on("update", () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(async () => {
+              await fetch(`${API_BASE}/api/save/${STORE_ID}/${pageSlug}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-              }),
-              fetch(`${API_BASE}/api/render/${STORE_ID}/${pageSlug}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  components: payload.components,
-                  css: payload.css,
+                body: JSON.stringify(buildPayload(editor)),
+              });
+            }, 3000);
+          });
+
+          editor.Commands.add("preview-publish", {
+            async run(editor) {
+              const previewWindow = window.open("about:blank", "_blank");
+
+              const payload = buildPayload(editor);
+              const [saveRes, renderRes] = await Promise.all([
+                fetch(`${API_BASE}/api/save/${STORE_ID}/${pageSlug}`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(payload),
                 }),
-              }),
-            ]);
-            if (!saveRes.ok || !renderRes.ok) {
-              console.error(
-                "FAILED TO PREVIEW",
-                saveRes.status,
-                renderRes.status,
+                fetch(`${API_BASE}/api/render/${STORE_ID}/${pageSlug}`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    components: payload.components,
+                    css: payload.css,
+                  }),
+                }),
+              ]);
+              if (!saveRes.ok || !renderRes.ok) {
+                console.error(
+                  "FAILED TO PREVIEW",
+                  saveRes.status,
+                  renderRes.status,
+                );
+                previewWindow?.close();
+              }
+              const { html } = await renderRes.json();
+
+              console.log("previewWindow:", previewWindow);
+              console.log("html length:", html?.length);
+
+              if (previewWindow) {
+                previewWindow.document.write(html);
+                previewWindow.document.close();
+              }
+            },
+          });
+          editor.Commands.add("create-page", {
+            async run(editor) {
+              const slug = window.prompt("Enter name for new page: ");
+
+              if (!slug) return;
+
+              const createPage = await fetch(
+                `${API_BASE}/api/pages/${STORE_ID}`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    slug: slug,
+                  }),
+                },
               );
-              previewWindow?.close();
-            }
-            const { html } = await renderRes.json();
-
-            console.log("previewWindow:", previewWindow);
-            console.log("html length:", html?.length);
-
-            if (previewWindow) {
-              previewWindow.document.write(html);
-              previewWindow.document.close();
-            }
+              if (!createPage.ok) {
+                window.alert("Incorrect page name");
+                return;
+              }
+              window.alert(
+                `Page was created to navigate use ?pageSlug=${slug}`,
+              );
+            },
+          });
+          editor.Panels.addButton("options", {
+            id: "preview-publish-btn",
+            className: "fa fa-rocket",
+            command: "preview-publish",
+            attributes: { title: "Preview & Publish" },
+          });
+          editor.Panels.addButton("options", {
+            id: "create-page-btn",
+            className: "fa fa-file",
+            command: "create-page",
+            attributes: { title: "Create new page" },
+          });
+        }}
+        options={{
+          height: "100vh",
+          storageManager: false,
+          canvas: {
+            styles: ["/components.css", ...cssUrls],
           },
-        });
-        editor.Commands.add("create-page", {
-          async run(editor) {
-            const slug = window.prompt("Enter name for new page: ");
-
-            if (!slug) return;
-
-            const createPage = await fetch(
-              `${API_BASE}/api/pages/${STORE_ID}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  slug: slug,
-                }),
-              },
-            );
-            if (!createPage.ok) {
-              window.alert("Incorrect page name");
-              return;
-            }
-            window.alert(`Page was created to navigate use ?pageSlug=${slug}`);
+          plugins: [myComponentsPlugin],
+          pluginsOpts: {
+            [myComponentsPlugin]: {
+              modules,
+              content,
+            },
           },
-        });
-        editor.Panels.addButton("options", {
-          id: "preview-publish-btn",
-          className: "fa fa-rocket",
-          command: "preview-publish",
-          attributes: { title: "Preview & Publish" },
-        });
-        editor.Panels.addButton("options", {
-          id: "create-page-btn",
-          className: "fa fa-file",
-          command: "create-page",
-          attributes: { title: "Create new page" },
-        });
-      }}
-      options={{
-        height: "100vh",
-        storageManager: false,
-        canvas: {
-          styles: ["/components.css", ...cssUrls],
-        },
-        plugins: [myComponentsPlugin],
-        pluginsOpts: {
-          [myComponentsPlugin]: {
-            modules,
-            content,
-          },
-        },
-      }}
-    />
+        }}
+      />
+      <select
+        className="gjs-field gjs-select"
+        value={pageSlug}
+        onChange={(e) => handlePageChange(e.target.value)}
+        style={{
+          position: "absolute",
+          top: "10px",
+          right: "450px",
+          width: "150px",
+          zIndex: 10,
+          color: "white",
+        }}
+      >
+        {pages.map((slug) => (
+          <option key={slug} value={slug}>
+            {slug}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }

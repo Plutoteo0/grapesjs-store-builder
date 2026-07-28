@@ -145,6 +145,10 @@ async function renderComponent(node, content, depth = 0) {
     throw new Error(`Component tree too deep`);
   }
   const rawContent = content[node.type];
+  if (rawContent === undefined) {
+    console.warn("Problems!");
+    return "";
+  }
   const wrapper = rawContent?.wrapper ?? DEFAULT_WRAPPERS[node.type];
   if (!rawContent?.wrapper) {
     console.warn(

@@ -380,6 +380,37 @@ child *components*.
   yet, mirrors the guard `pricing-cards.js` already used for the same reason); otherwise
   (restore) call `wireEditableChildren()` alone, which re-wires the listeners without
   ever feeding the restored HTML back through the parser.
+- **`editor.Panels.addButton(id, { el: someDomNode })` does not work for a `<select>`
+  in GrapesJS 0.23.2 — confirmed by direct DOM inspection, not assumed.** The button
+  model registers fine (`editor.Panels.getButton(...)` returns it, `el` attribute is the
+  real select), but the actual rendered DOM only ever gets a single bare `<option>`
+  appended to the panel's button container — the `<select>` wrapper itself is discarded
+  and never attached to the document. Reproduced in isolation (a fresh two-option test
+  select through the same call, independent of any other app code) — this is a library
+  quirk/bug in this version, not a bug in our usage. `el` support for a plain `<button>`-
+  like DOM node presumably still works (that's the documented use case); just don't rely
+  on it for `<select>`. Workaround used instead: a plain React `<select>` rendered as a
+  sibling of `<GjsEditor>` (not through `Panels` at all), styled with GrapesJS's own
+  `gjs-field`/`gjs-select` CSS classes (already loaded via the bundled
+  `grapes.min.css`) so it looks native — see the page-switcher section below.
+  **Gotcha inside the gotcha:** the bare `gjs-select` class alone forces `width: 100%`
+  (correct in its original context — a small wrapper — wrong on a wide plain container),
+  so an explicit inline `width` in `style` is required to override it; inline `style`
+  wins over the class since GrapesJS's CSS doesn't use `!important` here. Absolutely-
+  positioned custom elements placed as a sibling of `<GjsEditor>` also need an explicit
+  `zIndex` (GrapesJS's own panels render at `z-index: 4`) or they render underneath.
+- **`renderComponent()` in `page-renderer.mjs` had no guard for a component `type` with
+  zero entry in `content[storeId].json` at all** (distinct from the three known content
+  shapes) — e.g. a generic GrapesJS built-in type (`text`, `link`, `image`) ending up as
+  a *root-level* saved component (the same "stray drag" class of accident documented
+  above under acme's hero/header incident, just recurring on a different store/page).
+  Previously this crashed with `TypeError: Cannot read properties of undefined (reading
+  'template')` inside the `else` branch, caught by `server.mjs`'s blanket `catch` and
+  surfaced only as an opaque 404 — no indication of the real cause. Fixed 2026-07-28:
+  early-return `""` with a `console.warn` when `content[node.type] === undefined`, same
+  spirit as the existing "no wrapper in config" warn-and-fallback a few lines down. This
+  does not fix stray nesting itself (that's a canvas-editing mistake, not a code bug) —
+  it just stops one bad node from taking down the entire page's render.
 
 ---
 
@@ -911,35 +942,152 @@ pricing-card — confirmed edited fields render, and fields left at their defaul
 own values via the existing merge-fallback, exactly like acme. Script deleted
 after verification, not committed.
 
-## Next session — pick up here (as of 2026-07-23, end of day)
+## Page-switcher dropdown + render robustness fix — 2026-07-28
 
-Done today: CORS allowlist, `express.json()` body-size limit, depth-guard on
-the recursive render/type-collection functions, `beta.json` migration, and the
-multi-page storage/routing/create-page work (see dedicated sections above).
+**In-app page switcher, built and verified in a real browser (not just read
+through) — item 6 from the previous "Next session" list, done.**
+
+- **`GET /api/pages/:storeId`** (`server.mjs`) — no page list was stored
+  anywhere before this; pages only existed as `${storeId}.${pageSlug}.save.json`
+  files on disk. Reads `data/`, filters filenames against a per-storeId regex,
+  extracts each `pageSlug` capture group, returns `{ slugs: [...] }`. Validates
+  `storeId` the same way every other route does, before building the regex
+  (not after — regex built from unvalidated input first, then checked, was an
+  early draft bug, fixed before landing). Empty result for a store with zero
+  saved pages is a valid `{ slugs: [] }`, not a 404 — the store itself
+  (`acme.json`) can exist independent of any saved page.
+- **`App.jsx`** — tried the "native" route first: registering the switcher as
+  a third `editor.Panels.addButton("options", { el: select })`, alongside the
+  existing `preview-publish-btn`/`create-page-btn`. Confirmed via direct DOM
+  inspection (not just visual guess) that this does not work for a `<select>`
+  in GrapesJS 0.23.2 — see the new gotcha entry above for the exact failure
+  mode. Fell back to a plain React `<select>` rendered as a sibling of
+  `<GjsEditor>` (inside a `position: relative` wrapper div), styled with
+  GrapesJS's own `gjs-field`/`gjs-select` classes so it reads as part of the
+  editor chrome rather than a bolted-on control. Needed an explicit `width`
+  (overriding `gjs-select`'s own `width: 100%`) and `zIndex` (GrapesJS's panels
+  render at `z-index: 4`, so anything without an explicit z-index of its own
+  renders underneath them) to actually become visible and correctly sized.
+  `pages`/`slugs` moved to real `useState` (was briefly a local variable inside
+  `onEditor` during the `Panels.addButton` attempt) since the select is now
+  plain JSX and needs to re-render on data changes; `handlePageChange` moved
+  from inside `onEditor` to component-body scope for the same reason. Selecting
+  a page does a full `window.location.search` reassignment (real page reload),
+  consistent with how `STORE_ID`/`pageSlug` were already module-level consts
+  read once from the query string, not React state — no attempt made to
+  hot-swap pages inside an already-mounted editor instance.
+- Verified end-to-end in a real browser session: dropdown lists both of
+  acme's existing pages, visually matches the native device-selector's
+  styling, and selecting `new-slug` actually reloads to `?pageSlug=new-slug`
+  with the canvas showing that page's real saved content.
+
+**Found and fixed a real render-pipeline crash along the way, unrelated to the
+dropdown itself** — clicking Preview/Publish on `new-slug` returned an opaque
+404. Traced by calling `renderPage()` directly (bypassing `server.mjs`'s
+blanket `catch`, which was swallowing the real error) — actual cause was a
+`TypeError` in `renderComponent()` for a component `type` with no entry at all
+in `content["acme"].json` (a stray root-level `text` component, likely the
+header logo dragged out of `header` at some earlier point — the same "stray
+drag" class of accident already documented for acme's own save file, just
+recurring on the `new-slug` test page). Fixed with an early-return guard (see
+gotchas section above). **Note for whoever picks up "Links between pages"
+next:** the same class of accident recurred a *second* time later in this
+session, this time `pricing-cards` ending up nested inside `hero` instead of
+as a sibling — harmless post-fix (no crash, `hero`'s template-shape renderer
+just silently ignores children it doesn't expect), but it's the second
+independent occurrence of "stray nesting during manual canvas testing," not a
+one-off. **Discussed, not yet implemented:** the real fix for this class of
+bug is `droppable: false` on `themed-block.js`'s own `model.defaults` (shared
+by every type that `extend`s it — hero/footer/header/newsletter/pricing-card/
+pricing-cards) so GrapesJS's own canvas refuses the drop in the first place,
+rather than catching the consequence at render time. `pricing-cards.js`
+already does exactly this pattern today (`droppable: ".pricing-card"`,
+line 33) — a child type's own `defaults` override wins over an inherited one,
+so centralizing `droppable: false` in `themed-block.js` would not conflict
+with pricing-cards' existing narrower override. Left as a backlog item, not
+blocking.
+
+**Confirmed (by manually testing it, not just reading code) exactly why
+per-link `href` edits don't survive to production, and it clarifies next
+session's "Links between pages" work:** set a real `<a>` element's `href`
+trait in the canvas (GrapesJS's own built-in `href` field, no custom code
+involved) to `/store/acme/new-slug`, confirmed it saved correctly into
+`acme.home.save.json`'s component tree — then hit the real published route
+(`GET /store/acme/home`) and found the link still says `href="#"`. Root cause:
+`content.header.template` in `acme.json` hardcodes `href="#"` on all four nav
+links directly in the template string, with zero `{{}}` placeholders for
+them. Since `header` is a template-shape (shape 2) component, `renderComponent`
+only ever emits that fixed template — it never looks at `node.components`
+(where the canvas-edited `href` actually lives) at all. So today's manual
+edit had zero effect on the real page, and neither would *any* edit to those
+links today, regardless of mechanism (typed by hand or eventually via
+`linkTo`) — the gap is structural, not specific to the `linkTo` trait we
+haven't built yet.
+
+**This actually simplifies the "wire `linkTo` into the render pipeline" step
+that was scoped as open/undecided work** — `header` already goes through
+`renderComponent`'s existing `{{}}` → EJS substitution machinery
+(`adapter()` + `ejs.render()`), which is fully generic (works for any field
+name). So once `content.header.template` gets real `{{homeHref}}`-style
+placeholders (replacing the hardcoded `href="#"`s) and matching default
+field values, and `header.js` gets matching traits (`changeProp: 1`, no
+`selector` — an `href` isn't RTE text content, so inline double-click-edit
+doesn't apply here, same reasoning as `pricing-card`'s `image` trait being
+Traits-panel-only), the existing generic pipeline picks the value up for
+free. No new code needed in `page-renderer.mjs` itself — the only genuinely
+new code is the custom `linkTo` Trait type
+(`editor.Traits.addType("linkTo", { createInput, onEvent, onUpdate })`,
+sourced from the already-built `GET /api/pages/:storeId`).
+
+## Next session — pick up here (as of 2026-07-28, end of day)
+
+Done today: `GET /api/pages/:storeId` route, in-app page-switcher dropdown in
+`App.jsx` (see dedicated section above — item 6 from the previous list, now
+done), and a render-pipeline crash fix in `page-renderer.mjs` (missing-content
+guard). Also confirmed a real GrapesJS 0.23.2 limitation (`Panels.addButton`'s
+`el` option doesn't work for `<select>`) and flagged a recurring "stray
+nesting" pattern with a proposed (not yet implemented) `droppable: false` fix
+— both in the gotchas/session sections above.
 
 Plan, in order:
 
-1. **Links between pages** (deliberately scoped out of today's multi-page work
-   — see note above). **Decided 2026-07-23: a Trait-based dropdown listing the
-   store's existing pages** (not a free-text slug field — validated choice
-   over "might typo a page that doesn't exist"). Concrete first step, in order:
-   - **New `GET /api/pages/:storeId`** — no page list is stored anywhere today,
-     pages only exist as `${storeId}.${pageSlug}.save.json` files on disk. This
-     endpoint reads the `data/` directory, filters filenames matching
-     `^${storeId}\.(.+)\.save\.json$`, extracts each `pageSlug` via that
-     pattern, returns the list. Start here — no dependency on anything else,
-     easiest to verify in isolation.
-   - Then: a `type: "select"` Trait (`name: "linkTo"`) on the components that
-     need it (likely `header`'s nav links, `hero`'s button) — open problem to
-     solve when this is picked up: GrapesJS `select` Traits normally have
-     *static* options fixed at type-registration time, but this needs
-     *dynamic* options (the page list can change) — needs either a custom
-     Trait type or refreshing the options live (e.g. on trait-panel open),
-     not decided yet.
-   - Then: wire `linkTo` into the render pipeline (`renderComponent`/
-     `wrapWithTag` in `page-renderer.mjs` don't know about it yet) so the
-     saved `pageSlug` value becomes a real `href="/store/:storeId/:pageSlug"`
-     in the EJS output.
+1. **Links between pages** (deliberately scoped out of the multi-page work on
+   2026-07-23 — see note above). **Decided 2026-07-23: a Trait-based dropdown
+   listing the store's existing pages** (not a free-text slug field —
+   validated choice over "might typo a page that doesn't exist"). Concrete
+   first step, in order:
+   - ~~New `GET /api/pages/:storeId`~~ — **done 2026-07-28** (see dedicated
+     section above). Turned out to double as the data source for the in-app
+     page-switcher too, not just this Trait — same endpoint, two consumers.
+   - **Confirmed 2026-07-28 (by hand, not just reasoning about it) that this
+     is not optional polish — per-link `href` edits have *zero* effect on the
+     real published page today, for any of `header`'s nav links, regardless
+     of how the value is set** (typed by hand in the built-in trait, or later
+     via `linkTo` — same gap either way). See the dedicated finding above for
+     the full trace. Concrete sub-steps, in order:
+     1. `header.js` — add one trait per nav link (`homeHref`, `aboutHref`,
+        `servicesHref`, `contactHref`; `changeProp: 1`, no `selector` — an
+        `href` isn't RTE text content, so inline double-click-edit doesn't
+        apply, same reasoning as `pricing-card`'s `image` trait being
+        Traits-panel-only).
+     2. `acme.json`/`beta.json` — replace the hardcoded `href="#"`s in
+        `content.header.template` with `{{homeHref}}`-style placeholders,
+        plus a default value per field (e.g. `"homeHref": "#"`) so stores
+        that haven't set a real link yet don't crash (same merge-fallback
+        mechanism already used for every other templated field).
+     3. Build the actual `linkTo` Trait type
+        (`editor.Traits.addType("linkTo", { createInput, onEvent, onUpdate })`),
+        options populated from `GET /api/pages/:storeId`, applied to the
+        four new traits from step 1 (and `hero`'s button, if in scope).
+     4. Verify end-to-end: pick a page in the trait's dropdown, Preview &
+        Publish, confirm the real HTML from `GET /store/:storeId/:pageSlug`
+        has an actual `href`, not `#`.
+   - **Correction to this plan's earlier framing:** no changes needed in
+     `page-renderer.mjs` itself for this — `header` already goes through the
+     existing generic `{{}}` → EJS substitution (`adapter()` + `ejs.render()`
+     inside `renderComponent`), which picks up any field name automatically.
+     Steps 1–2 above are the only "wiring" required; step 3 is the only
+     genuinely new code.
 2. **Make Preview actually Publish** — largely superseded by today's
    `GET /store/:storeId/:pageSlug` route, which already *is* a real
    storefront-facing URL. What's left: decide whether the popup-preview button
@@ -954,12 +1102,22 @@ Plan, in order:
    `/styles/acme/*.css`) — fine for now, ties into the already-planned
    CDN-migration (versioned CDN URLs solve this as a side effect, per
    Production architecture section) — not urgent on its own.
-5. **Clean up test-data debris in `acme.save.json`** — low priority, cosmetic.
-6. **No in-app page switcher/list yet** — creating a page requires knowing its
-   slug and manually editing the `?pageSlug=` query string to open it; no UI
-   lists a store's existing pages. Worth doing before this feels like a real
-   multi-page editor, not blocking for now.
-7. Backend production roadmap items (DB migration, JWT auth, admin panel)
+5. **Clean up test-data debris in `acme.save.json`/`acme.new-slug.save.json`**
+   — low priority, cosmetic.
+6. ~~No in-app page switcher/list yet~~ — **done 2026-07-28**, see dedicated
+   section above.
+7. **`droppable: false` on `themed-block.js`'s shared `model.defaults`** — not
+   yet implemented, discussed and deliberately deferred 2026-07-28. Would stop
+   the recurring "stray nesting" accident (an unrelated component ending up as
+   a child of a template-shape type like `hero`, silently dropped by the
+   renderer) at the source — GrapesJS's own canvas would refuse the drop,
+   instead of the render pipeline having to cope with it after the fact.
+   `pricing-cards.js` already uses this exact mechanism narrowly
+   (`droppable: ".pricing-card"`); centralizing the stricter `droppable: false`
+   in `themed-block.js` itself would apply to every type that extends it
+   without needing to touch each file individually, and wouldn't conflict with
+   pricing-cards' own override (child `defaults` win over inherited ones).
+8. Backend production roadmap items (DB migration, JWT auth, admin panel)
    remain unstarted, in the order already agreed there — informed by the
    multi-page work above (`store_pages` should be designed page-aware from the
    first migration, matching what `${storeId}.${pageSlug}.save.json` already
