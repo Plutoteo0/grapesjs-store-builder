@@ -14,6 +14,10 @@ export default {
       content: "",
       logoText: "",
       ctaText: "",
+      homeHref: "",
+      aboutHref: "",
+      servicesHref: "",
+      contactHref: "",
 
       traits: [
         {
@@ -41,6 +45,10 @@ export default {
           changeProp: 1,
           selector: ".header-cta",
         },
+        { type: "linkTo", name: "homeHref", changeProp: 1 },
+        { type: "linkTo", name: "aboutHref", changeProp: 1 },
+        { type: "linkTo", name: "servicesHref", changeProp: 1 },
+        { type: "linkTo", name: "contactHref", changeProp: 1 },
       ],
     },
 

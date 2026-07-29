@@ -79,6 +79,30 @@ export default function App() {
         onEditor={async (editor) => {
           window.editor = editor;
 
+          const pages = await fetch(`${API_BASE}/api/pages/${STORE_ID}`)
+            .then((r) => (r.ok ? r.json() : { slugs: [] }))
+            .catch(() => ({ slugs: [] }));
+
+          editor.Traits.addType("linkTo", {
+            createInput({ trait }) {
+              const select = document.createElement("select");
+              select.className = "gjs-field gjs-select";
+              pages.slugs.forEach((slug) => {
+                const option = document.createElement("option");
+                option.value = `/store/${STORE_ID}/${slug}`;
+                option.textContent = slug;
+                select.appendChild(option);
+              });
+              return select;
+            },
+            onEvent({ elInput, component, trait }) {
+              component.set(trait.get("name"), elInput.value);
+            },
+            onUpdate({ elInput, component, trait }) {
+              elInput.value = component.get(trait.get("name")) || "";
+            },
+          });
+
           const saved = await fetch(
             `${API_BASE}/api/load/${STORE_ID}/${pageSlug}`,
           )

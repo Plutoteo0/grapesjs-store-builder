@@ -1,3 +1,68 @@
+.hero-inner {
+  max-width: 700px;
+  margin: 0 auto;
+  text-align: center;
+  padding: 80px 24px;
+}
+
+.hero-heading {
+  font-size: 40px;
+  font-weight: 800;
+  margin-bottom: 16px;
+}
+
+.hero-subheading {
+  font-size: 18px;
+  margin-bottom: 32px;
+  opacity: 0.85;
+}
+
+.hero-button {
+  display: inline-block;
+  border: none;
+  border-radius: 8px;
+  padding: 14px 32px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.hero-light {
+  background: #fafafa;
+  color: #111;
+}
+
+.hero-light .hero-button {
+  background: #111;
+  color: #fff;
+}
+
+.hero-dark {
+  background: #111;
+  color: #fff;
+}
+
+.hero-dark .hero-button {
+  background: #fff;
+  color: #111;
+}
+
+.hero-image {
+  background-size: cover;
+  background-position: center;
+  color: #fff;
+}
+
+.hero-image .hero-inner {
+  border-radius: 12px;
+}
+
+.hero-image .hero-button {
+  background: #fff;
+  color: #111;
+}
+
 .hero-heading {
   background-color: #9d174d;
 }

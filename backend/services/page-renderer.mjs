@@ -27,7 +27,7 @@ async function getContent(storeID) {
   return data.content;
 }
 
-async function getManifest(storeID) {
+export async function getManifest(storeID) {
   const path = join(__dirname, "..", "data", `${storeID}.json`);
   const rawContent = await readFile(path, "utf-8");
   const data = JSON.parse(rawContent);
@@ -78,7 +78,7 @@ async function buildCssLinks(storeID, data) {
   const linkUrls = cssUrls.map((cssUrl) => {
     return `<link rel="stylesheet" href="${cssUrl}">`;
   });
-  linkUrls.push(`<link rel="stylesheet" href="/components.css">`);
+  linkUrls.unshift(`<link rel="stylesheet" href="/components.css">`);
   return linkUrls;
 }
 

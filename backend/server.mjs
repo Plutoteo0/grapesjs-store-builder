@@ -3,10 +3,11 @@ import cors from "cors";
 import { readFile, writeFile, access } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { renderPage } from "./services/page-renderer.mjs";
+import { renderPage, getManifest } from "./services/page-renderer.mjs";
 import { readdir } from "fs/promises";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const publicDir = join(__dirname, "..", "frontend", "public");
 const app = express();
 
 const ALLOWED_ORIGINS = ["http://localhost:5173"];
@@ -188,6 +189,30 @@ app.get("/api/pages/:storeId", async (req, res) => {
   });
   const slugs = foundSlugs.filter((s) => s !== null);
   return res.status(200).json({ slugs: slugs });
+});
+
+app.get("/styles/:storeId/*", async (req, res) => {
+  if (!isValidStoreId(req.params.storeId)) {
+    return res.status(400).end();
+  }
+  try {
+    const manifest = await getManifest(req.params.storeId);
+    const allowed = new Set(manifest.map((m) => m.cssUrl).filter(Boolean));
+    if (!allowed.has(req.path)) {
+      return res.status(404).end();
+    }
+    res.sendFile(join(publicDir, req.path));
+  } catch (err) {
+    res.status(404).json({ error: "Error occurred" });
+  }
+});
+
+app.get("/components/*", (req, res) => {
+  res.sendFile(join(publicDir, req.path));
+});
+
+app.get("/components.css", (req, res) => {
+  res.sendFile(join(publicDir, "components.css"));
 });
 
 app.listen(3001, () => {

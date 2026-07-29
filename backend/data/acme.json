@@ -51,10 +51,14 @@
     },
 
     "header": {
-      "template": "<div class=\"header-logo\">{{ logoText }}</div><nav class=\"header-nav\"><a href=\"#\">Home</a><a href=\"#\">About</a><a href=\"#\">Services</a><a href=\"#\">Contact</a></nav><a href=\"#\" class=\"header-cta\">{{ ctaText }}</a>",
+      "template": "<div class=\"header-logo\">{{ logoText }}</div><nav class=\"header-nav\"><a href=\"{{homeHref}}\">Home</a><a href=\"{{aboutHref}}\">About</a><a href=\"{{servicesHref}}\">Services</a><a href=\"{{contactHref}}\">Contact</a></nav><a href=\"#\" class=\"header-cta\">{{ ctaText }}</a>",
       "logoText": "Acme Corp",
       "ctaText": "Sign In",
-      "wrapper": { "tag": "header", "classPrefix": "header" }
+      "wrapper": { "tag": "header", "classPrefix": "header" },
+      "homeHref": "#",
+      "aboutHref": "#",
+      "servicesHref": "#",
+      "contactHref": "#"
     },
 
     "newsletter": {
