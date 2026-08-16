@@ -1039,86 +1039,355 @@ new code is the custom `linkTo` Trait type
 (`editor.Traits.addType("linkTo", { createInput, onEvent, onUpdate })`,
 sourced from the already-built `GET /api/pages/:storeId`).
 
-## Next session — pick up here (as of 2026-07-28, end of day)
+## Links between pages, manifest-driven static routes, and the CSS split — 2026-07-29
 
-Done today: `GET /api/pages/:storeId` route, in-app page-switcher dropdown in
-`App.jsx` (see dedicated section above — item 6 from the previous list, now
-done), and a render-pipeline crash fix in `page-renderer.mjs` (missing-content
-guard). Also confirmed a real GrapesJS 0.23.2 limitation (`Panels.addButton`'s
-`el` option doesn't work for `<select>`) and flagged a recurring "stray
-nesting" pattern with a proposed (not yet implemented) `droppable: false` fix
-— both in the gotchas/session sections above.
+**1. `linkTo` Trait — done, verified end-to-end on the real production route.**
+Closed out the "Links between pages" item from 2026-07-28's plan.
 
-Plan, in order:
+- `header.js` — four new fields (`homeHref`, `aboutHref`, `servicesHref`,
+  `contactHref`; `changeProp: 1`, no `selector` — an `href` isn't RTE text
+  content, same reasoning as `pricing-card`'s `image` trait). Template string
+  updated to use `{{homeHref}}`-style placeholders instead of hardcoded `#`.
+- `acme.json` — matching `{{}}` placeholders + default values (`"#"`) added to
+  `content.header.template`, same merge-fallback mechanism every other
+  templated field already uses. No changes needed in `page-renderer.mjs`
+  itself — `header` already goes through the generic `{{}}` → EJS
+  substitution, which picks up any field name automatically.
+- `App.jsx` — `editor.Traits.addType("linkTo", { createInput, onEvent, onUpdate })`
+  registered in `onEditor`, *before* `editor.setComponents(saved.components)`
+  restores the canvas (a custom trait type has to exist before a component
+  using it gets restored). `createInput` builds a `<select>` from
+  `GET /api/pages/:storeId` (fetched once, same endpoint the page-switcher
+  dropdown already uses — two consumers, one route), with `value` set to the
+  full `/store/:storeId/:slug` path (not the bare slug) so the trait's value
+  is already a usable `href`. `onEvent`/`onUpdate` are the two-way sync halves
+  GrapesJS requires for any custom trait type — `onEvent` writes UI → model
+  (fires on the select's `change`), `onUpdate` writes model → UI (fires on
+  programmatic `.set()`, e.g. during restore) — without `onUpdate` a restored
+  page would always show the first `<option>` regardless of the real saved
+  value.
+- **Two real bugs caught and fixed during review, before shipping:** (1)
+  `.then((r) => (r.ok ? r.json : { slugs: [] }).catch(...))` — `r.json`
+  wasn't called (missing `()`), and `.catch` was chained onto the ternary's
+  *result* instead of the fetch promise, so it could never actually catch a
+  network failure. Fixed to `.then((r) => (r.ok ? r.json() : { slugs: [] }))
+  .catch(...)`. (2) the four new traits were initially declared
+  `type: "text"` (copy-paste from step 1) instead of `type: "linkTo"` —
+  caught before the custom dropdown ever got exercised.
+- **Verified by hand, not just in the editor:** picked `home` for `HomeHref`
+  in the canvas, hit Preview/Publish, then read `GET /store/acme/home`
+  directly — confirmed `href="/store/acme/home"` in the real served HTML,
+  not `#`. This closes the exact gap the 2026-07-28 finding described (canvas
+  edits to `href` having zero effect on production).
+- **Known gap, not yet handled:** no empty/`#` option in the `<select>` — a
+  component whose saved `href` value doesn't match any current page slug
+  (e.g. that page got renamed) renders as an unselected dropdown, and
+  `onUpdate` silently leaves it on the first `<option>` with no warning.
+  Same category as the existing "dead selector → `console.warn`" pattern
+  elsewhere in the codebase; not done here yet.
+- **Not yet migrated:** `beta.json`'s `header.template` still hardcodes `#`
+  — same treatment (placeholders + defaults) needed there before `linkTo`
+  does anything for that store. `hero`'s button (`buttonText`/its `href`) was
+  in scope per the original plan but not done this session either — `linkTo`
+  itself is reusable as-is (registered once, globally, at the `editor` level,
+  not tied to `header`), only the per-component trait + template wiring is
+  outstanding.
 
-1. **Links between pages** (deliberately scoped out of the multi-page work on
-   2026-07-23 — see note above). **Decided 2026-07-23: a Trait-based dropdown
-   listing the store's existing pages** (not a free-text slug field —
-   validated choice over "might typo a page that doesn't exist"). Concrete
-   first step, in order:
-   - ~~New `GET /api/pages/:storeId`~~ — **done 2026-07-28** (see dedicated
-     section above). Turned out to double as the data source for the in-app
-     page-switcher too, not just this Trait — same endpoint, two consumers.
-   - **Confirmed 2026-07-28 (by hand, not just reasoning about it) that this
-     is not optional polish — per-link `href` edits have *zero* effect on the
-     real published page today, for any of `header`'s nav links, regardless
-     of how the value is set** (typed by hand in the built-in trait, or later
-     via `linkTo` — same gap either way). See the dedicated finding above for
-     the full trace. Concrete sub-steps, in order:
-     1. `header.js` — add one trait per nav link (`homeHref`, `aboutHref`,
-        `servicesHref`, `contactHref`; `changeProp: 1`, no `selector` — an
-        `href` isn't RTE text content, so inline double-click-edit doesn't
-        apply, same reasoning as `pricing-card`'s `image` trait being
-        Traits-panel-only).
-     2. `acme.json`/`beta.json` — replace the hardcoded `href="#"`s in
-        `content.header.template` with `{{homeHref}}`-style placeholders,
-        plus a default value per field (e.g. `"homeHref": "#"`) so stores
-        that haven't set a real link yet don't crash (same merge-fallback
-        mechanism already used for every other templated field).
-     3. Build the actual `linkTo` Trait type
-        (`editor.Traits.addType("linkTo", { createInput, onEvent, onUpdate })`),
-        options populated from `GET /api/pages/:storeId`, applied to the
-        four new traits from step 1 (and `hero`'s button, if in scope).
-     4. Verify end-to-end: pick a page in the trait's dropdown, Preview &
-        Publish, confirm the real HTML from `GET /store/:storeId/:pageSlug`
-        has an actual `href`, not `#`.
-   - **Correction to this plan's earlier framing:** no changes needed in
-     `page-renderer.mjs` itself for this — `header` already goes through the
-     existing generic `{{}}` → EJS substitution (`adapter()` + `ejs.render()`
-     inside `renderComponent`), which picks up any field name automatically.
-     Steps 1–2 above are the only "wiring" required; step 3 is the only
-     genuinely new code.
-2. **Make Preview actually Publish** — largely superseded by today's
-   `GET /store/:storeId/:pageSlug` route, which already *is* a real
-   storefront-facing URL. What's left: decide whether the popup-preview button
-   should now just open that real URL in a new tab instead of
-   `document.write`-ing a fetched copy (simpler, and it's testing the actual
-   served page rather than a client-rendered stand-in) — a small follow-up,
-   not a new subsystem.
+**2. Manifest-driven static routes for CSS/JS — done.** Found by accident,
+not by design: opening the real production route directly on the backend
+(`http://localhost:3001/store/acme/home`, port 3001, not the Vite dev server
+on 5173) returned every CSS file as `503` — `server.mjs` had **no static file
+serving at all**, not even a blanket `express.static`. This is a distinct,
+already-existing gap, not "waiting on the CDN migration" — confirmed by
+testing, and worth remembering as its own thing next time CSS/JS 404s or
+503s in an unfamiliar way.
+
+Considered a blanket `express.static(publicDir)` first (simplest, works
+immediately since `frontend/public/`'s on-disk layout already mirrors every
+manifest `url`/`cssUrl` verbatim) — rejected in favor of a manifest-validated
+route, consistent with the rest of the codebase's "never trust a path,
+validate against config" habit (`isValidStoreId` before every disk read).
+Landed as two route groups, not one, because they have genuinely different
+contracts:
+
+- **`GET /styles/:storeId/*`** — the only path shape that actually carries a
+  `storeId` segment. Validates `isValidStoreId`, then reads
+  `getManifest(storeId)` (now `export`ed from `page-renderer.mjs` — it was
+  module-private before, only used internally by `buildCssLinks`), builds a
+  `Set` of that store's `cssUrl` values, and only serves the file if
+  `req.path` is in that set — a 404 for a legit-shaped but undeclared path
+  (`/styles/acme/doesnotexist.css`) confirms the whitelist is real, not
+  decorative.
+- **`GET /components/*` + `GET /components.css`** — no `storeId` in these
+  paths at all (both are shared across every store today), so no manifest
+  lookup makes sense for them; served unconditionally as a flat fallback.
+  Deliberately kept even though `components.css` itself is about to become
+  functionally redundant (see next section) — "becomes a dead code path in
+  prod, harmless" was an explicit, accepted tradeoff rather than something
+  to clean up now.
+- **Bug caught in review, fixed independently mid-session:** the first draft
+  of the `/styles` route was `app.get("/styles/:storeId", ...)` — no `/*`
+  wildcard — which only matches `/styles/acme` and silently never matches
+  the real nested requests (`/styles/acme/header.1.0.0.css`). Flagged, then
+  fixed to `/styles/:storeId/*` before the next verification pass.
+
+**3. `components.css` — tested empirically, then fully superseded by
+per-component files (kept only as an inert fallback).** Before touching
+anything, ran an actual experiment instead of reasoning about it in the
+abstract: renamed `components.css` away and reloaded the editor — confirmed
+it is genuinely load-bearing today (layout, theme backgrounds, and button
+styling all broke), not dead weight. Then, as a scoped proof of concept,
+moved just `header`'s base CSS into `styles/acme/header.1.0.0.css`, disabled
+`components.css` again, and confirmed `header` alone kept rendering
+correctly while the rest of the page (not yet migrated) broke as expected —
+validating that the per-component-file approach works before committing to
+doing it for everything.
+
+Given that proof, migrated all remaining types the same way — for **both**
+`acme` and `beta` — moving each type's base layout/theme rules (previously
+one shared section per type inside `components.css`) into that type's own
+existing per-store file (`styles/<store>/<name>.<version>.css`), on top of
+whatever store-specific override already lived there (e.g. acme's
+`.footer-inner { background-color: #0d3894 }`). Covered: `footer`, `header`,
+`hero`, `newsletter`, `pricing-cards` for both stores, plus `testimonial` for
+`acme` only (`beta`'s manifest has no `testimonial` entry — correctly
+skipped, not an oversight). `components.css` itself is unchanged and stays
+in place — the user's explicit call was to keep serving it as a harmless
+fallback rather than delete it now, since a store that hasn't migrated yet
+(or a future component type that forgets its own base CSS) still has
+something to fall back to.
+
+**Found and fixed a real cascade-order bug this exposed — only visible on
+the actual production route, not in the editor.** Once per-component files
+carried genuine color differences (not just duplicate-but-identical rules),
+load order started to matter: `buildCssLinks()` in `page-renderer.mjs` was
+appending `/components.css`'s `<link>` **last** (`linkUrls.push(...)`), so on
+the real `GET /store/:storeId/:pageSlug` route it loaded *after* every
+per-component stylesheet — and at equal specificity, last-loaded wins. Result:
+`components.css`'s base `.newsletter-light { background: #f5f5f5 }` was
+silently overriding the newly-added `styles/acme/newsletter.1.0.0.css`'s
+`.newsletter-inner { background-color: #0d3894 }` override, visible only as
+a wrong (grey instead of blue) background on the real published page — the
+editor itself never showed this, because `App.jsx`'s own `styles` array
+already lists `/components.css` **first** (`styles: ["/components.css",
+...cssUrls]`), so the editor and the production renderer had silently
+different load orders the whole time. Fixed with `linkUrls.unshift(...)`
+instead of `.push(...)`, matching the editor's own order; reloaded
+`GET /store/acme/home` and `GET /store/acme/new-slug` directly and confirmed
+colors/borders/layout now match the editor exactly.
+
+**Worth remembering as a pattern, not just a one-off fix:** this is the
+second time in two sessions that the editor's rendering path and the
+production (`page-renderer.mjs`) rendering path have silently disagreed —
+first the header-nesting render crash (2026-07-28), now this cascade-order
+mismatch. Both were only caught by deliberately testing the real
+`GET /store/:storeId/:pageSlug` route by hand, not by reading the code or
+trusting that "it works in the editor." Any future change that touches how
+either path assembles CSS/HTML should get the same treatment: verify against
+the actual production route, not just the canvas.
+
+## Dynamic data providers (products/prices) — in progress, started 2026-08-04
+
+**Goal (from the internship supervisor):** components like `pricing-cards`
+should be able to render real data (products, prices) instead of the
+statically-authored `content[name]` from `acme.json`/`beta.json` — and the
+mechanism needs to generalize to any future dynamic component (filters,
+etc.), not just cards, and work correctly per-store.
+
+**Key architectural decision (confirmed with the user before writing code):
+production render always resolves live data, never the saved snapshot.**
+`pricing-cards` already had a container pattern — `pricing-cards.js`'s
+`init()` bakes `pricing-card` children into `*.save.json` once, on first
+open (`!this.components().length` guard), and the existing `isContainer`
+branch in `page-renderer.mjs` renders those saved children on every
+request. That's correct for editable marketing copy, but wrong for prices —
+a saved snapshot from weeks ago would silently go stale. So the new
+"dynamic container" path deliberately **ignores `node.components`
+entirely** and rebuilds children fresh from the data provider on every
+render call. The canvas-editor side (`pricing-cards.js`'s one-time bake)
+is untouched for now — known limitation, see below.
+
+**New files:**
+- `backend/services/data-providers/products.mjs` — `getProducts(storeId, params)`,
+  currently a mock (`MOCK_PRODUCTS` keyed by `storeId`), same async signature
+  a real DB query will have later. Framework-agnostic per the standing
+  `services/` rule — `storeId` explicit, no module-level cache.
+- `backend/services/data-providers/index.mjs` — `DATA_PROVIDERS` registry,
+  `{ products: getProducts }`. A future provider (e.g. `categories`) is a
+  new file + one line here — nothing else changes.
+- `backend/services/content-resolver.mjs` — `resolveContent(storeId, content)`.
+  Walks every `content[type]` entry; if it has a `dataSource` key, looks up
+  the matching function in `dataProviders`, calls `provider(storeId, raw.params)`,
+  and attaches the result as `items` (deliberately not `cards` — the
+  resolver doesn't know about specific component field names). Unknown
+  `dataSource` → `console.warn` + leave the entry as-is, same
+  warn-and-fallback pattern as `wrapper`/`richTextFields` elsewhere.
+
+**Changes to `backend/services/page-renderer.mjs`:**
+- `getContent(storeId)` now `export`ed (was module-private) and returns
+  `resolveContent(storeID, data.content)` instead of raw `data.content` —
+  so both the canvas (`GET /api/content/:storeId`, once `server.mjs` is
+  updated) and the production renderer see identical, already-resolved
+  content, not two independent code paths that could drift.
+- `renderComponent()` gained a new `isDynamicContainer` branch, checked
+  **before** the existing `isContainer` branch: if `rawContent.dataSource`
+  is set, build synthetic child nodes (`{ type: rawContent.childType, ...item }`)
+  from `rawContent.items` and render each recursively through the same
+  `renderComponent()` — a dynamic `pricing-card` child still renders via its
+  own `content["pricing-card"].template` + EJS exactly like any other child,
+  no changes needed to `pricing-card.js` itself. `node.components` (the
+  saved snapshot) is never consulted for this branch, which is the whole
+  point — see the live-vs-snapshot decision above.
+
+**Scope for this pass (deliberate, confirmed with the user):** only `acme.json`'s
+`pricing-cards` migrates to `dataSource: "products"` — `beta.json` stays on
+the static `cards` array until the mechanism is proven working end-to-end on
+one store.
+
+**Status at end of 2026-08-04 session:** all three new files written, but
+carried three real bugs into the next session (caught in review 2026-08-05,
+none had been exercised end-to-end yet):
+- `content-resolver.mjs` imported `{ dataProviders }` (named import) while
+  `data-providers/index.mjs` exported `DATA_PROVIDERS` — a genuine name
+  mismatch, `SyntaxError` at module load, would have failed before any
+  request even reached the resolver.
+- `resolveContent()` built its `resolved` object in the loop but had no
+  `return resolved` at the end — every call site would have silently
+  received `undefined` instead of the resolved content map.
+- Inside the function body, the lookup itself was also still typed as
+  `dataProviders[raw.dataSource]` (lowercase) even after the import got
+  renamed — `ReferenceError` on the first real `dataSource` lookup.
+
+All three fixed 2026-08-05 (user's own fix, reviewed): import + lookup both
+now `DATA_PROVIDERS`, `return resolved;` added.
+
+**Completed and verified end-to-end, 2026-08-05:**
+1. `server.mjs` — `getContent` imported from `page-renderer.mjs`, route body
+   changed to `res.json(await getContent(req.params.storeId))`; the now-dead
+   `const data = await getStoreData(...)` in that route was removed too
+   (it was doing an unused extra disk read on every request).
+2. `acme.json` — `content["pricing-cards"]` replaced with
+   `{ wrapper: {...}, dataSource: "products", childType: "pricing-card" }`.
+   Caught one more bug here during review: the key was first written as
+   `"childtype"` (lowercase t) — `renderComponent()`'s `isDynamicContainer`
+   branch reads `rawContent.childType` (camelCase), so the mismatch would
+   have produced synthetic child nodes with `type: undefined` and broken
+   the render. Fixed to `"childType"`.
+3. Verified by hand, not just read: `GET /api/content/acme` → `pricing-cards`
+   now carries a real `items` array (resolved mock products), not the old
+   static `cards`. `acme.home.save.json` currently has no `pricing-cards`
+   root node (`header`/`newsletter`/`hero` only), so `GET /store/acme/home`
+   itself doesn't exercise the new branch yet — confirmed separately via a
+   throwaway script (`renderPage("acme", "home", { components: [{ type:
+   "header" }, { type: "pricing-cards" }], css: "" })`, deleted after use)
+   that the `isDynamicContainer` branch itself renders 3 real `pricing-card`
+   blocks correctly. Then edited `MOCK_PRODUCTS` in `products.mjs`
+   (`"Starter"` → `"Starter-TEST"`), re-ran the same script with **no editor
+   involved at all**, confirmed the new title appeared immediately — proves
+   the data is genuinely live, not baked from a snapshot. Reverted the mock
+   back to `"Starter"` afterward, confirmed clean via `git status`.
+
+**Still open, not done this session:** actually adding a `pricing-cards`
+block to `acme`'s `home` page in the canvas, so the live `GET
+/store/acme/home` route exercises the dynamic path for real (today it's
+only proven via the throwaway script above, not the actual saved page). Also
+still the known limitation from 2026-08-04: canvas editor bakes
+`pricing-card` children into `*.save.json` once on first open, so an
+already-created page's canvas won't show live price changes — only
+`GET /store/:storeId/:pageSlug` does, which is what this feature is for.
+
+## Next session — pick up here (as of 2026-08-05, end of day)
+
+1. **Add a `pricing-cards` block to `acme`'s `home` page in the actual
+   canvas** (open `?store=acme&pageSlug=home`, drag it in, save) — closes
+   the "only proven via throwaway script" gap above and gives a real page to
+   test the dynamic-container branch against on the live route.
+2. Once that's on a real saved page, re-run the "edit `MOCK_PRODUCTS`,
+   re-request `/store/acme/home` without touching the editor" check against
+   the *actual* route (not the throwaway script) to close out the
+   end-to-end verification for real.
+3. Decide whether to migrate `beta.json`'s `pricing-cards` to `dataSource`
+   too (deferred twice now — originally scoped to prove it on one store
+   first, still not revisited).
+
+## Canvas/dynamic-data sync fix + layout-component idea — 2026-08-10
+
+**Bug found and fixed: `pricing-cards.js` was still reading the pre-dynamic
+content shape, so cards silently stopped rendering in the canvas.** When
+`acme.json`'s `content["pricing-cards"]` moved to `{ dataSource, childType,
+items }` (see "Dynamic data providers" above), `pricing-cards.js`'s `init()`
+was never updated to match — it still read `this.get("cards")`, a key that
+no longer exists in the resolved content at all (renamed to `items`). Result:
+`init()` found an empty array and added zero children, so the canvas showed
+nothing, while `GET /store/acme/home` (which goes through
+`renderComponent`'s `isDynamicContainer` branch directly, never touches
+`pricing-cards.js`) rendered correctly — confirmed by curling the route
+directly and comparing against the empty canvas. **Fixed** (user's own
+change, reviewed): `defaults.cards` → `defaults.items`, `init()` now reads
+`this.get("items")`. Guard logic (`!this.components().length`, bake children
+once) unchanged — still the same known limitation as before: canvas bakes
+children on first open and won't show a later mock/DB change until the
+`pricing-cards` block is removed and re-dragged (or a fresh page created);
+only the production route re-resolves live on every request.
+
+Verified with a throwaway 4th mock product (`"Ultimate"`, `products.mjs`) —
+`GET /api/content/acme` and `GET /store/acme/home` picked it up immediately
+with zero backend restart (resolver reads the mock fresh per-request); the
+already-open canvas correctly did *not* show it, consistent with the
+bake-once limitation above, not a new bug.
+
+**Layout-component idea discussed, not built — for a future session.**
+Currently every root-level component in `data.components` renders as a
+plain vertical sibling in `<body>` — there's no wrapping element with any
+`flex`/`grid`, so two components can't sit side-by-side (e.g. `hero` on the
+left, a future `filter` component pinned top-right) without one. Considered
+and rejected pulling in `grapesjs-blocks-basic`/`grapesjs-preset-webpage`
+(the official Row/Column blocks) — rejected specifically because that
+plugin compiles into the frontend bundle directly, breaking the
+per-component CDN/manifest update model every other component type already
+gets ("fix `hero.js` → bump version → client hits F5 → gets the fix, no
+frontend redeploy"). Decided instead: build a plain `row`/layout component
+the same way as every other manifest-driven type — a `droppable` container
+with no `content[name]` template (pure layout, no server-driven content),
+CSS grid/flex in its own per-store CSS file, and a `columns` trait
+(`type: "select"`, same pattern as `hero`'s `theme` trait) driving a
+`row-cols-N` class via `updateContent()`. Not started — flagged as a
+backlog item below. If this grows past a single `columns` trait (gutter,
+alignment, per-breakpoint columns, etc.) worth reconsidering as a shared
+"layout config" pattern reused across multiple container types, but not
+proven need for that yet — YAGNI until a second such component exists.
+
+**Older backlog, still open, unchanged from 2026-07-29:**
+
+1. **Finish the `linkTo` rollout** — `beta.json`'s `header.template` still
+   hardcodes `#` (needs the same placeholder + default treatment `acme.json`
+   already got), and `hero`'s button was in scope per the original plan but
+   not wired up this session. Also worth adding a "no match" fallback option
+   in the `linkTo` `<select>` (see the known-gap note above) before this sees
+   more traits added on top of it.
+2. **Make Preview actually Publish** — still open, same shape as before:
+   swap the popup's `document.write`-ed copy for just opening the real
+   `GET /store/:storeId/:pageSlug` URL directly. Small follow-up, not a new
+   subsystem — this route already exists and is already verified working.
 3. **Race condition on concurrent saves (last-write-wins)** — still open,
-   pre-launch blocker; now concretely "lock per `(storeId, pageSlug)`" per the
-   multi-page work above.
-4. **CSS `<link>` paths are still relative** (`/components.css`,
-   `/styles/acme/*.css`) — fine for now, ties into the already-planned
-   CDN-migration (versioned CDN URLs solve this as a side effect, per
-   Production architecture section) — not urgent on its own.
+   pre-launch blocker; "lock per `(storeId, pageSlug)`" per the multi-page
+   work from 2026-07-23.
+4. ~~**`droppable: false` on `themed-block.js`'s shared `model.defaults`**~~
+   — **done and verified 2026-08-10.** `themed-block.js` now has
+   `model.defaults = { droppable: false }`; every `extend: "themed-block"`
+   type inherits it. `pricing-cards.js` keeps working — its own
+   `droppable: ".pricing-card"` in its own `defaults` still wins over the
+   inherited value (child's own key overrides parent's, confirmed behavior,
+   see the `addType`/`extend` note elsewhere in this file). Blocks the
+   recurring "stray nesting" accident at the source now (GrapesJS's own
+   canvas refuses the drop) instead of the render pipeline coping with it
+   after the fact. Confirmed in a real browser (not just read through) —
+   dragging a component onto `hero`/`header` in the canvas is refused, cards
+   still drop into `pricing-cards` fine.
 5. **Clean up test-data debris in `acme.save.json`/`acme.new-slug.save.json`**
    — low priority, cosmetic.
-6. ~~No in-app page switcher/list yet~~ — **done 2026-07-28**, see dedicated
-   section above.
-7. **`droppable: false` on `themed-block.js`'s shared `model.defaults`** — not
-   yet implemented, discussed and deliberately deferred 2026-07-28. Would stop
-   the recurring "stray nesting" accident (an unrelated component ending up as
-   a child of a template-shape type like `hero`, silently dropped by the
-   renderer) at the source — GrapesJS's own canvas would refuse the drop,
-   instead of the render pipeline having to cope with it after the fact.
-   `pricing-cards.js` already uses this exact mechanism narrowly
-   (`droppable: ".pricing-card"`); centralizing the stricter `droppable: false`
-   in `themed-block.js` itself would apply to every type that extends it
-   without needing to touch each file individually, and wouldn't conflict with
-   pricing-cards' own override (child `defaults` win over inherited ones).
-8. Backend production roadmap items (DB migration, JWT auth, admin panel)
-   remain unstarted, in the order already agreed there — informed by the
-   multi-page work above (`store_pages` should be designed page-aware from the
-   first migration, matching what `${storeId}.${pageSlug}.save.json` already
-   does on disk).
+6. Backend production roadmap items (DB migration, JWT auth, admin panel)
+   remain unstarted, in the order already agreed there.
+7. **Build a `row`/layout component** (see 2026-08-10 section above) — plain
+   manifest-driven `droppable` container, `columns` trait, no
+   `content[name]` template needed. Not started.

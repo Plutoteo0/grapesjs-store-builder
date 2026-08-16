@@ -3,6 +3,7 @@ import { readFile, writeFile } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import sanitizeHtml from "sanitize-html";
+import { resolveContent } from "./content-resolver.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -19,12 +20,12 @@ async function getData(storeID, pageSlug) {
   return data;
 }
 
-async function getContent(storeID) {
+export async function getContent(storeID) {
   const path = join(__dirname, "..", "data", `${storeID}.json`);
   const rawContent = await readFile(path, "utf-8");
   const data = JSON.parse(rawContent);
 
-  return data.content;
+  return resolveContent(storeID, data.content);
 }
 
 export async function getManifest(storeID) {
@@ -154,6 +155,22 @@ async function renderComponent(node, content, depth = 0) {
     console.warn(
       `No wrapper in config for ${node.type} using DEFAULT_WRAPPERS`,
     );
+  }
+
+  const isDynamicContainer =
+    rawContent && typeof rawContent === "object" && rawContent.dataSource;
+
+  if (isDynamicContainer) {
+    const childNodes = (rawContent.items ?? []).map((item) => ({
+      type: rawContent.childType,
+      ...item,
+    }));
+    const childrenHtml = (
+      await Promise.all(
+        childNodes.map((child) => renderComponent(child, content, depth + 1)),
+      )
+    ).join("");
+    return wrapWithTag(wrapper, node, childrenHtml);
   }
 
   const isContainer =

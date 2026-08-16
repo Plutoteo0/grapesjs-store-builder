@@ -24,18 +24,20 @@ export default {
       tagName: "div",
       name: "Pricing Cards",
       classes: ["pricing-cards", "pricing-grid-3"],
-      cards: [], 
+      items: [],
       toolbar: [
         { attributes: { class: "fa fa-arrows" }, command: "tlb-move" },
         { attributes: { class: "fa fa-trash" }, command: "tlb-delete" },
-        { attributes: { class: "fa fa-plus" }, command: "pricing-cards:add-card"},
+        {
+          attributes: { class: "fa fa-plus" },
+          command: "pricing-cards:add-card",
+        },
       ],
-      droppable: ".pricing-card"
+      droppable: ".pricing-card",
     },
 
-    
     init() {
-      const cards = this.get("cards") || [];
+      const cards = this.get("items") || [];
 
       if (!this.components().length) {
         cards.forEach((card) => {

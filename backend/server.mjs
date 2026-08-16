@@ -5,6 +5,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { renderPage, getManifest } from "./services/page-renderer.mjs";
 import { readdir } from "fs/promises";
+import { getContent } from "./services/page-renderer.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, "..", "frontend", "public");
@@ -53,8 +54,7 @@ app.get("/api/content/:storeId", async (req, res) => {
     return res.status(400).json({ error: "Invalid storeID" });
   }
   try {
-    const data = await getStoreData(req.params.storeId);
-    res.json(data.content);
+    res.json(await getContent(req.params.storeId));
   } catch {
     res.status(404).json({ error: "Store not found" });
   }

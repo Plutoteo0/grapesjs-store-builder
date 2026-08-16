@@ -9,6 +9,10 @@ function sanitizeRteHtml(html) {
 
 export default {
   model: {
+    defaults: {
+      droppable: false,
+    },
+
     init() {
       const traits = this.getTraits().filter((t) => t.get("changeProp"));
       const watchProps = traits.map((t) => t.getName());
