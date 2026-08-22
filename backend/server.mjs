@@ -11,7 +11,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, "..", "frontend", "public");
 const app = express();
 
-const ALLOWED_ORIGINS = ["http://localhost:5173"];
+const ALLOWED_ORIGINS = [
+  "http://localhost:5173",
+  "http://localhost:5273",
+];
 app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use(
   express.json({

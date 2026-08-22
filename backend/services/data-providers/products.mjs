@@ -28,9 +28,34 @@ const MOCK_PRODUCTS = {
       image: "https://picsum.photos/seed/ultimate/280/160",
       buttonText: "Choose Plan",
     },
+    {
+      title: "Unlimited",
+      price: "$500/mo",
+      desc: "Everything, unlimited, with priority support.",
+      image: "https://picsum.photos/seed/ultimate/280/160",
+      buttonText: "Choose Plan",
+    },
+    {
+      title: "Unlimited",
+      price: "$500/mo",
+      desc: "Everything, unlimited, with priority support.",
+      image: "https://picsum.photos/seed/ultimate/280/160",
+      buttonText: "Choose Plan",
+    },
   ],
 };
 
+/**
+ * Fetches products for a store. Currently a mock — reads from `MOCK_PRODUCTS`
+ * — but has the same async signature a real DB query will have later, so
+ * callers (`resolveContent`) don't need to change when this becomes real.
+ *
+ * @param {string} storeId
+ * @param {object} [params] - reserved for future filters (category, price
+ *   range, etc.) — not used yet
+ * @returns {Promise<object[]>} array of product objects, or `[]` if the store
+ *   has no data
+ */
 export async function getProducts(storeId, params) {
   return MOCK_PRODUCTS[storeId] ?? [];
 }

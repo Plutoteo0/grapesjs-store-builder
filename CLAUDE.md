@@ -784,12 +784,14 @@ Both fixed and verified by hand (temporary throwaway test scripts, not committed
   `hero-" onmouseover="alert(1)` broke out of the attribute. Fixed with a
   `THEME_RE = /^[a-z0-9-]+$/` check; anything that doesn't match falls back to
   `"light"`, same fallback already used for "no theme class found at all."
-- Still open, not yet done: CORS is wide open (`cors()` with no origin
-  allowlist), `express.json()` has no body-size limit, and
-  `collectUsedTypes`/`renderComponent` recurse into `node.components` with no
-  depth guard — all three are DoS-shaped, all three matter more once this stops
-  being localhost-only. Picking this back up is next session's first item (see
-  below).
+- ~~Still open, not yet done: CORS is wide open, no body-size limit, no
+  recursion depth guard~~ — **all three fixed since, undated (caught stale
+  2026-08-20 while doing an unrelated project-status review — code had moved
+  on, this note hadn't).** Confirmed against the actual code: `server.mjs`
+  now has `ALLOWED_ORIGINS` + `cors({ origin: ALLOWED_ORIGINS })` (not a bare
+  `cors()`), `express.json({ limit: "1mb" })`, and both
+  `collectUsedTypes`/`renderComponent` in `page-renderer.mjs` throw past a
+  `depth > 20` recursion guard. Nothing left to do here.
 
 ## Preview/Publish now actually opens a preview — 2026-07-22
 
@@ -1388,6 +1390,321 @@ proven need for that yet — YAGNI until a second such component exists.
    — low priority, cosmetic.
 6. Backend production roadmap items (DB migration, JWT auth, admin panel)
    remain unstarted, in the order already agreed there.
-7. **Build a `row`/layout component** (see 2026-08-10 section above) — plain
-   manifest-driven `droppable` container, `columns` trait, no
-   `content[name]` template needed. Not started.
+7. ~~**Build a `row`/layout component**~~ — **done 2026-08-20, see below.**
+
+## Backend `services/` commented, live-data behavior re-verified, italic styling wired — 2026-08-20
+
+**Task from the internship supervisor, item 1: add data-flow comments to every
+function in `backend/services/`.** Done for all of `content-resolver.mjs`,
+`data-providers/index.mjs`, `data-providers/products.mjs`, and
+`page-renderer.mjs` (all 9 functions plus `DEFAULT_WRAPPERS`/`THEME_RE`) —
+each comment states where its arguments come from, what the function does,
+and where the return value goes/who consumes it. Written collaboratively
+(explained the "why" behind each function out loud first — merge-fallback
+for missing trait fields, mutation-vs-spread in `resolveContent`, the
+payload-vs-disk race in `renderPage`, etc. — before the comment text was
+settled), not authored solo and handed over.
+
+**Found and fixed along the way:** `backend/node_modules` was missing
+`sanitize-html` even though it's listed in `package.json` — `npm install`
+had never been (re-)run after the dependency was added. Backend crashed on
+boot with `ERR_MODULE_NOT_FOUND` until `npm install` was run in `backend/`.
+
+**Task from the supervisor, item 2: think through the "stale data" risk for
+dynamic components (prices/products) and confirm/fix it.** Turned into a
+hands-on verification session rather than new code, since most of the
+architecture was already correct:
+
+- **Production route (`GET /store/:storeId/:pageSlug`) needs no redeploy or
+  resave when the underlying data changes** — re-confirmed by hand (not just
+  reading code): added a real card to `MOCK_PRODUCTS.acme` in `products.mjs`,
+  restarted the backend (picking up the dependency fix above), reloaded
+  `http://localhost:3001/store/acme/home` with zero editor interaction —
+  new card appeared immediately. This is the `isDynamicContainer` branch in
+  `renderComponent()` doing its job: it never reads `node.components` (the
+  saved snapshot), always calls `resolveContent()` → the live provider, on
+  every request.
+- **Canvas editor staleness (`pricing-cards.js`'s bake-once `init()`) is
+  real and still unfixed** — discussed three possible fixes (always rebuild
+  on open / manual "refresh data" button / diff-and-merge on open) but
+  **no code changed here** — tentatively decided the canvas can be treated
+  as a design preview ("what it'll roughly look like"), not a live data
+  view, matching the fact that only the published route is contractually
+  promised to be live. Not written up as a final decision, worth revisiting
+  before this goes in front of the internship supervisor.
+- **Style Manager edits to a shared class already propagate to every card,
+  no extra code needed** — confirmed by inspecting `pricing-card.js`: every
+  editable field (`title`, `desc`, `image`) is wired to a shared CSS class
+  (`.pricing-card-title`, etc.), never a per-instance ID. A Style Manager
+  color change on one card's title generates a CSS rule against that shared
+  class, so it visually applies to all cards via ordinary CSS cascade — this
+  was true before today, just hadn't been verified in-browser.
+- **RTE-level formatting (double-click → bold/italic/underline on specific
+  text) is correctly per-instance, not a bug** — GrapesJS's default RTE
+  toolbar already ships `['bold','italic','underline','strikethrough','link','wrap']`
+  with no extra config. It writes into that one component's own trait value
+  (`this.set(prop, sanitizeRteHtml(child.getEl().innerHTML), { fromRte: true })`
+  in `themed-block.js`), which is correctly scoped to the one instance being
+  edited — same as any rich text editor (Word, Docs) not propagating a
+  bolded word to every other copy of that word on the page.
+- **`font-style` added to the Style Manager's Typography sector** —
+  GrapesJS's built-in default `sectors` config (hardcoded in
+  `grapesjs/dist/grapes.min.js`, confirmed by reading the bundle directly)
+  does not include `font-style` out of the box (`font-family`, `font-size`,
+  `font-weight`, `letter-spacing`, `color`, `line-height`, `text-align`,
+  `text-shadow` only). `App.jsx`'s `GjsEditor` `options` now passes an
+  explicit `styleManager.sectors` array — the same default sectors,
+  reconstructed, with `"font-style"` inserted into Typography. GrapesJS has
+  no built-in dropdown/options for this property (unlike `text-align`, which
+  gets a button group) — renders as a plain text input, so the value
+  (`italic`) is typed by hand, not chosen from a list. Acceptable for now,
+  a custom `type`/options list would be a future polish item, not blocking.
+- **Verified end-to-end in a real browser (not just reasoning through it):**
+  selected one pricing-card title, set `font-style: italic` in the new
+  Typography field — all cards' titles went italic simultaneously (shared
+  class, as predicted). Waited for autosave, then loaded
+  `GET http://localhost:3001/store/acme/home` directly (not the editor's
+  Preview popup) — titles were italic there too, confirming `data.css`
+  really does reach the production `<style>` tag end to end. Same check
+  also re-confirmed the dynamic-container behavior from a different angle:
+  the production page showed `"Starter"` (the live mock's title) even
+  though the canvas had an unrelated trait-level edit reading `"StarterFFFF"`
+  sitting in `acme.home.save.json` — the saved snapshot for this component
+  type is provably never consulted by the real route.
+
+**Not done, flagged for a future session:** no code changes for the
+canvas-staleness question (see above) — needs a real decision, not just a
+verified-safe default, before the internship supervisor signs off on it.
+
+**Also stale, corrected while reviewing overall project status:** the
+"Still open, not yet done: CORS is wide open..." bullet under the
+2026-07-22 security-fixes section no longer matched the code — `server.mjs`
+already restricts CORS to an explicit `ALLOWED_ORIGINS` list, caps
+`express.json()` at `1mb`, and both `collectUsedTypes`/`renderComponent`
+already have a `depth > 20` recursion guard. All three were fixed at some
+undated point after that section was written; the note just never got
+updated. Struck through and corrected in place rather than left misleading.
+
+### `row`/layout component — built and shipped, 2026-08-20
+
+Closes the layout-component backlog item from 2026-08-10 (side-by-side
+placement was impossible before this — every root component rendered as a
+plain vertical stack). Built the same way it was scoped back then: a
+manifest-driven type extending `themed-block`, not a pulled-in GrapesJS
+preset plugin (would've broken the per-component CDN/manifest update model
+every other type gets).
+
+- **`frontend/public/components/layout-comp.js`** — `tagName: "div"`,
+  `droppable: true` (the one deliberate override of `themed-block`'s shared
+  `droppable: false` default — every other type inherits "no drops",
+  layout's whole purpose is to accept them), a `size` trait (`type:
+  "select"`, options `2`/`3`/`4`), and its own `updateContent()` that swaps
+  a `row-cols-N` class based on `size` — same pattern as `hero`'s
+  theme-class swap, just keyed off `size` instead of `theme`. No
+  `content`/template field at all — it renders nothing of its own, it's a
+  pure wrapper for whatever gets dropped into it.
+- **Two real bugs caught and fixed during review** (written by the user,
+  reviewed collaboratively before/after each fix, not authored solo): (1)
+  `updateContent()` was first nested *inside* `defaults` instead of being a
+  sibling of `defaults` under `model` — confirmed by evaluating the module
+  directly in Node (`model.updateContent` was `undefined`, the base
+  no-op from `themed-block.js` was running instead). (2) even after moving
+  it to the right place, the body was still copy-pasted from `hero.js`
+  verbatim (`this.get("theme")`, `hero-light`/`hero-dark`/`hero-image`
+  classes) — had nothing to do with this component's own `size` trait,
+  swapped for the `row-cols-N` logic. (3) `size` had no matching key in
+  `defaults` (unlike `hero`'s `theme: "light"`), so the very first
+  `updateContent()` call (fired unconditionally from `themed-block.js`'s
+  `init()`) would've produced `row-cols-undefined` — added `size: "2"`.
+- **`backend/data/acme.json`** — manifest entry (`layout-comp` →
+  `/components/layout-comp.js` + a `cssUrl`), and a `content["layout-comp"]`
+  entry with **only** a `wrapper` (`{ tag: "div", classPrefix: "row-cols" }`),
+  no `template` key. This was a deliberate, non-obvious requirement, not an
+  afterthought: `renderComponent()` bails out entirely
+  (`console.warn("Problems!"); return "";`) for any type with **no** entry
+  at all in `content[type]` — even a "pure layout, nothing server-driven"
+  component needs *some* entry, just to carry its `wrapper`. With no
+  `template` and no `dataSource`, it correctly falls into the existing
+  `isContainer` branch, which renders `node.components` (the real dropped-in
+  children) as-is — the same branch beta's static `pricing-cards` shape
+  already exercises, no new renderer code needed.
+- **`frontend/public/styles/acme/layout-comp.1.0.0.css`** — `row-cols-2/3/4`
+  → `display: grid; grid-template-columns: repeat(N, 1fr)`. No explicit
+  "rows" control — CSS Grid wraps children into new rows automatically as
+  columns fill, so a separate rows trait would've been unused config
+  (caught before it was built, not after).
+- Verified working in a real browser (hard-reloaded the editor first —
+  `public/components/*.js` is fetched via Blob URL + dynamic `import()`,
+  cacheable like any HTTP request, so a plain HMR reload isn't enough to
+  pick up a brand new file).
+
+**Discussed, not yet built — a real next step, not just an idea:** ship
+`layout-comp` pre-seeded with a few empty placeholder `div`s inside (e.g.
+3 empty droppable boxes matching a 3-column default) instead of a fully
+empty container with no visual affordance for where dropping is even
+possible. Same shape of problem `pricing-cards.js` already solves for
+itself (bakes real children into `node.components` once on first open, via
+the `!this.components().length` guard in its own `init()`) — `layout-comp`
+would need the same kind of one-time bake, just with generic empty
+placeholder divs instead of real `pricing-card` typed children. Worth
+doing next session.
+
+## JSDoc pass on `backend/services/`, `plugin.js`, `App.jsx` — 2026-08-22
+
+Added proper `/** */` JSDoc (`@param`/`@returns`/`@type`, plus prose explaining
+the non-obvious "why") to every function in `page-renderer.mjs`,
+`content-resolver.mjs`, `data-providers/index.mjs`, `data-providers/products.mjs`,
+`plugin.js`'s `myComponentsPlugin`, and the key named functions/commands in
+`App.jsx` (`importFromUrl`, `loadComponents`, `loadPages`, `handlePageChange`,
+`preview-publish`'s `run`, the `linkTo` trait registration). Written
+collaboratively (Claude showed one worked example per file, explained the
+reasoning, user wrote and saved, Claude reviewed) — same division of labor as
+the rest of this project's backend/frontend work. Deliberately skipped
+`buildPayload` and the `create-page` command — genuinely simple, no non-obvious
+"why" to capture, would've been documentation for its own sake. Caught and
+fixed several real mistakes along the way (not just typos): a `@param`
+documenting an argument `sanitizeRichField` doesn't actually take; a truncated
+`@returns` description (copy/paste artifact) in both `buildCssLinks` and
+`myComponentsPlugin`; a JSDoc block placed on the wrong declaration (`createInput`
+instead of the `editor.Traits.addType("linkTo", ...)` call it was actually
+describing) — moved to sit directly above the call it documents, since JSDoc
+tooling attaches to whatever declaration immediately follows the block, not to
+whatever the prose happens to be about.
+
+## `header-layout` + reusable `layout-slot` component — 2026-08-22
+
+Built a two-column layout container for `acme`'s header area — closes the
+"ship layout-comp pre-seeded with empty placeholder divs" backlog item from
+2026-08-20, but as a new, separate component rather than retrofitting
+`layout-comp` (fixed at 2 slots, not a `size` trait).
+
+- **`frontend/public/components/layout-slot.js`** (new) — a generic,
+  reusable "empty droppable box" type, deliberately **not** named
+  `header-layout-slot`: any future layout container can create children of
+  `type: "layout-slot"` and reuse the same registered type, same
+  `content["layout-slot"]` config, same CSS class — avoids needing a new
+  component file + manifest entry + content entry per layout variant, which
+  was the whole point of pushing back on the first draft (one bespoke slot
+  type per layout felt wasteful, and was).
+- **`frontend/public/components/header-layout.js`** (new) — `extend:
+  "themed-block"`, own `init()` (same bake-once pattern as
+  `pricing-cards.js`: `!this.components().length` guard, `this.components().add([{ type: "layout-slot" }, { type: "layout-slot" }])`
+  on first load only).
+- **`backend/data/acme.json`** — manifest entries for both new types
+  (`layout-slot` **before** `header-layout` — child-before-container
+  ordering, same rule as `pricing-card`/`pricing-cards`; `layout-slot` has
+  no `cssUrl`, same reasoning as `pricing-card` having none — its styling
+  lives in the parent's stylesheet). `content` entries for both: `{ wrapper:
+  { tag: "div", baseClass: "header-layout" } }` / `{ wrapper: { tag: "div",
+  baseClass: "layout-slot" } }` — `baseClass` only, no `classPrefix` (no
+  theme concept for either type, same shape as `pricing-card`). Both are
+  therefore `isContainer`-shape on the backend (no `template`, no
+  `dataSource`) — no new renderer code needed, same branch `pricing-cards`
+  already exercises.
+- **Per-slot sizing — deliberately done via the Style Manager, not a custom
+  trait.** Considered (and partially designed) a `grow` trait on
+  `layout-slot` reusing the `classPrefix` mechanism `layout-comp`'s `size`
+  trait already established (`wrapWithTag` extracting a `slot-grow-N` class
+  from `node.classes` the same way it extracts a theme) — but the user
+  pushed back in favor of the simpler path already proven end-to-end in this
+  project (see the 2026-08-20 italic/`font-style` verification): select the
+  slot in canvas, deactivate its `layout-slot` class chip in the Selector
+  Manager so GrapesJS targets the component's own `id` instead, set
+  `flex-grow` via Style Manager. No new trait, no new CSS class, no code —
+  `data.css` already carries per-`id` rules through to the real
+  `GET /store/:storeId/:pageSlug` route with zero renderer changes needed.
+  Trade-off made explicit: this requires knowing the Selector-Manager
+  class-vs-id toggle exists; not discoverable without being told once.
+
+**Four real bugs found and fixed this session, in order hit — worth reading
+in sequence, each one only surfaced by actually testing the real route/canvas,
+not by reading the code:**
+
+1. **Untyped slot nodes → silently dropped from production render.** First
+   draft created slots as bare `{ tagName: "div", classes: [...], droppable:
+   true, removable: false }` with no `type` key. GrapesJS's `toJSON()`
+   serializes such a node with **no `type` key at all** (confirmed by reading
+   the actual saved JSON, not assumed) — so `content[node.type]` on the
+   backend resolved to `content[undefined]`, hit the existing "no content
+   entry for this type" guard (`console.warn("Problems!"); return "";`), and
+   both slots (plus whatever was dropped inside them — a `newsletter` and a
+   `testimonial` in the test case) vanished from the real published page
+   with zero error, while the canvas showed everything fine. Fixed by giving
+   slots a real registered `type: "layout-slot"` instead of anonymous
+   default components — same fix shape as the rest of this codebase's
+   "never trust an untyped/unknown node, give it explicit config" pattern.
+2. **`:empty` CSS applied to the wrong selector broke the whole layout.**
+   Meant to show the dashed "drop here" border only on an empty slot (so a
+   filled slot / a real production page never shows placeholder chrome to
+   real visitors), but the fix was first applied to `.header-layout` (the
+   *container*, which always has 2 children and is therefore never
+   `:empty`) instead of `.layout-slot` (the individual slot). Result:
+   `display: flex` never applied at all, slots stacked vertically instead of
+   side-by-side. Fixed by moving `:empty` to `.layout-slot` specifically,
+   keeping the container's own `display: flex` and the slot's own `flex: 1`
+   unconditional.
+3. **`TypeError: Cannot read properties of undefined (reading 'map')` in
+   `renderComponent`'s `isContainer` branch — `node.components.map(...)`
+   crashed the whole page render.** Root cause: a `layout-slot` with zero
+   children (nothing dropped in) serializes with **no `components` key at
+   all** (GrapesJS omits it rather than writing `components: []`) — every
+   prior `isContainer`-shape type in this codebase (`pricing-cards`,
+   `layout-comp` before this) always had at least the bake-once children
+   present by the time anyone hit the render route, so this exact edge case
+   never surfaced before. `layout-slot` is the first `isContainer` type that
+   can legitimately stay empty. Fixed with `(node.components ?? [])`, same
+   nullish-fallback pattern the `isDynamicContainer` branch already used for
+   `rawContent.items`.
+4. **A component dropped inside a `layout-slot` couldn't be deleted after a
+   page reload — not a GrapesJS bug, a `themed-block` inheritance mismatch.**
+   `layout-slot.js` initially had no `init()` of its own, so it inherited
+   `themed-block`'s generic one — whose restore branch (`this.components().length`
+   truthy → `wireEditableChildren()`) unconditionally sets `removable: false`
+   on every child that doesn't match an entry in `_editableMap`. Since
+   `layout-slot` declares no `traits` at all, `_editableMap` is always `{}`,
+   so **every** real user-dropped child (a `hero`, in the test case) got
+   locked the moment the page was reloaded and the slot's saved children were
+   restored — `wireEditableChildren()` was written under the assumption that
+   a component's children are always template-derived, an assumption that's
+   false for a container of freely dropped content. Fixed with an empty
+   `init() {}` override in `layout-slot.js`, opting out of `themed-block`'s
+   generic behavior entirely — same category of override `pricing-cards.js`
+   already uses for the same underlying reason (a container of real,
+   non-template children shouldn't run template-oriented lifecycle logic).
+5. **Not a bug — a canvas selection UX gap, worth remembering.** Once a
+   component with a full-bleed inner wrapper (e.g. `hero`'s `.hero-inner`,
+   which normally has visible section margin around it) gets squeezed into a
+   narrow `flex: 1` slot, `.hero-inner` can stretch to fill the entire slot
+   with zero exposed area belonging to the outer component alone — making it
+   impossible to click-select the outer component directly in canvas, only
+   its inner children. Not fixable in CSS/JS without deliberately reserving
+   padding; the practical fix is using the Layer Manager (select by name in
+   the tree) or the toolbar's "select parent" control instead of clicking in
+   canvas.
+
+**Verified end-to-end, not just reasoned through:** dragged `header-layout`
+onto `acme`'s `home` page, dropped `newsletter` and `testimonial` into the two
+slots, saved, reloaded, confirmed both survive restore and are independently
+editable/removable, hit `GET /store/acme/home` directly and confirmed both
+render with no backend warnings/crashes.
+
+**Also wired this session, same page:** `hero`'s button now supports linking
+to another page of the same store — added a `buttonHref` field +
+`{ type: "linkTo", changeProp: 1 }` trait (no `selector` — an `href` isn't RTE
+text, same reasoning as `header`'s nav-link traits) to `hero.js`, replaced
+`content.hero.template`'s hardcoded `href="#"` with `{{buttonHref}}` +
+a `"#"` default in `acme.json`. Reused the already-global `linkTo` trait type
+from `App.jsx` as-is — no new trait code needed, exactly as anticipated in the
+2026-07-29 entry ("`linkTo` itself is reusable as-is... only the per-component
+trait + template wiring is outstanding"). Verified by picking `home` in the
+canvas, publishing, and confirming `href="/store/acme/home"` on the real
+`GET /store/acme/home` route.
+
+**Next session:**
+1. `beta.json`'s `header.template` still hardcodes `#` — same `linkTo`
+   treatment `acme.json`'s header already got (still open from 2026-08-10).
+2. Consider whether `layout-comp` itself should adopt the same
+   pre-seeded-`layout-slot` pattern now that it exists, instead of staying a
+   fully empty droppable container.
+3. Race condition on concurrent saves (last-write-wins) — still open,
+   pre-launch blocker, unchanged from prior sessions.

@@ -1,0 +1,17 @@
+.row-cols-2,
+.row-cols-3,
+.row-cols-4 {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+
+.row-cols-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+.row-cols-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+.row-cols-4 {
+  grid-template-columns: repeat(4, 1fr);
+}

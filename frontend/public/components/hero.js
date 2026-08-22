@@ -14,6 +14,7 @@ export default {
       headingText: "",
       subheadingText: "",
       content: "",
+      buttonHref: "#",
       script: function() {
         const button = this.querySelector(".hero-button");
         if (button) {
@@ -54,6 +55,12 @@ export default {
           label: "Subheading text",
           changeProp: 1,
           selector: ".hero-subheading"
+        },
+        {
+          type: "linkTo",
+          name: "buttonHref",
+          label: "Button link",
+          changeProp: 1
         }
       ],
     },
