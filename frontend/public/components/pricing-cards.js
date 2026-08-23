@@ -37,13 +37,17 @@ export default {
     },
 
     init() {
-      const cards = this.get("items") || [];
+      const items = this.get("items") || [];
+      const existingIds = new Set(
+        this.components()
+          .map((child) => child.get("id"))
+          .filter(Boolean)
+      );
 
-      if (!this.components().length) {
-        cards.forEach((card) => {
-          this.components().add({ type: "pricing-card", ...card });
-        });
-      }
+      const newItems = items.filter((item) => !existingIds.has(item.id));
+      newItems.forEach(item => {
+        this.components().add({ type: "pricing-card" , ...item})
+      });
     },
   },
 };

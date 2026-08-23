@@ -18,11 +18,30 @@ function buildPayload(editor) {
   };
 }
 
+
+
 export default function App() {
   const [modules, setModules] = useState(null);
   const [cssUrls, setCssUrls] = useState([]);
   const [content, setContent] = useState(null);
   const [pages, setPages] = useState([]);
+
+  /**
+   * Fetches the list of existing page slugs for this store (for the
+   * page-switcher dropdown).
+   *
+   * @returns {Promise<void>}
+   */
+  async function getPages() {
+      const res = await fetch(`${API_BASE}/api/pages/${STORE_ID}`);
+      const data = await res.json();
+      return data.slugs;
+    }
+
+  async function loadPages() {
+    const slugs = await getPages();
+    setPages(slugs);
+  }
 
   useEffect(() => {
 
@@ -75,18 +94,7 @@ export default function App() {
     }
     loadComponents();
 
-  /**
-   * Fetches the list of existing page slugs for this store (for the
-   * page-switcher dropdown).
-   *
-   * @returns {Promise<void>}
-   */
-    async function loadPages() {
-      const res = await fetch(`${API_BASE}/api/pages/${STORE_ID}`);
-      const data = await res.json();
-      setPages(data.slugs);
-    }
-    loadPages();
+    getPages().then(setPages)
   }, []);
 
 /**
@@ -255,6 +263,7 @@ export default function App() {
                 window.alert("Incorrect page name");
                 return;
               }
+              await loadPages()
               window.alert(
                 `Page was created to navigate use ?pageSlug=${slug}`,
               );

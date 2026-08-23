@@ -34,6 +34,7 @@ export default {
       desc: "",
       image: "",
       buttonText: "Choose Plan",
+      id: "",
 
       content:
         '<img src="{{ image }}" alt="{{ title }}" class="pricing-card-image" /><h3 class="pricing-card-title">{{ title }}</h3><p class="pricing-card-price">{{ price }}</p><p class="pricing-card-desc">{{ desc }}</p><button class="pricing-card-button">{{ buttonText }}</button>',
