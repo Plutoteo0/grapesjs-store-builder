@@ -1,3 +1,25 @@
+function dynamicDataRender(container, items, childType) {
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+  [...container.components()].forEach((child) => {
+    const id = child.get("id");
+    if(!id) {
+      return;
+    }
+
+    const item = itemsById.get(id);
+    if (!item) {
+      child.remove();
+    } else {
+      child.set(item);
+      itemsById.delete(id);
+    }
+  });
+
+  itemsById.forEach((item) => {
+    container.components().add({ type: childType, ...item })
+  })
+}
+
 export default {
   extend: "themed-block",
   blockInfo: {
@@ -38,16 +60,7 @@ export default {
 
     init() {
       const items = this.get("items") || [];
-      const existingIds = new Set(
-        this.components()
-          .map((child) => child.get("id"))
-          .filter(Boolean)
-      );
-
-      const newItems = items.filter((item) => !existingIds.has(item.id));
-      newItems.forEach(item => {
-        this.components().add({ type: "pricing-card" , ...item})
-      });
+      dynamicDataRender(this, items, "pricing-card");
     },
   },
 };
