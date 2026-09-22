@@ -1,55 +1,8 @@
-const MOCK_PRODUCTS = {
-  acme: [
-    {
-      id: 1,
-      title: "Starter",
-      price: "$19/mo",
-      desc: "Perfect for individuals just getting started.",
-      image: "https://picsum.photos/seed/starter/280/160",
-      buttonText: "Choose Plan",
-    },
-    {
-      id: 2,
-      title: "Pro",
-      price: "$49/mo",
-      desc: "For growing teams that need more power.",
-      image: "https://picsum.photos/seed/pro/280/160",
-      buttonText: "Choose Plan",
-    },
-    {
-      id: 3,
-      title: "Enterprise",
-      price: "$99/mo",
-      desc: "Advanced features for large organizations.",
-      image: "https://picsum.photos/seed/enterprise/280/160",
-      buttonText: "Choose Plan",
-    },
-    {
-      id: 4,
-      title: "Ultimate",
-      price: "$199/mo",
-      desc: "Everything, unlimited, with priority support.",
-      image: "https://picsum.photos/seed/ultimate/280/160",
-      buttonText: "Choose Plan",
-    },
-    {
-      id: 5,
-      title: "Unlimited",
-      price: "$500/mo",
-      desc: "Everything, unlimited, with priority support.",
-      image: "https://picsum.photos/seed/ultimate/280/160",
-      buttonText: "Choose Plan",
-    },
-    {
-      id: 6,
-      title: "Beast pack",
-      price: "$1000/mo",
-      desc: "Everything, unlimited, with priority support.",
-      image: "https://picsum.photos/seed/ultimate/280/160",
-      buttonText: "Choose Plan",
-    },
-  ],
-};
+import { readFile } from "fs/promises";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
  * Fetches products for a store. Currently a mock — reads from `MOCK_PRODUCTS`
@@ -63,5 +16,10 @@ const MOCK_PRODUCTS = {
  *   has no data
  */
 export async function getProducts(storeId, params) {
-  return MOCK_PRODUCTS[storeId] ?? [];
+  const raw = await readFile(
+    join(__dirname, "..", "..", "data", "products.json"),
+    "utf-8",
+  );
+  const allProducts = JSON.parse(raw);
+  return allProducts[storeId] ?? [];
 }

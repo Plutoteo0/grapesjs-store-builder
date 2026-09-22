@@ -2,7 +2,9 @@ function sanitizeRteHtml(html) {
   return html
     .replace(/\s(data-gjs-[\w-]+|draggable|data-selectme)="[^"]*"/g, "")
     .replace(/\sclass="([^"]*)"/g, (match, classList) => {
-      const kept = classList.split(/\s+/).filter((c) => c && !c.startsWith("gjs-"));
+      const kept = classList
+        .split(/\s+/)
+        .filter((c) => c && !c.startsWith("gjs-"));
       return kept.length ? ` class="${kept.join(" ")}"` : "";
     });
 }
@@ -14,18 +16,24 @@ export default {
     },
 
     init() {
+      if (!this.get("componentID")) {
+        this.set("componentID", crypto.randomUUID());
+      }
+
       const traits = this.getTraits().filter((t) => t.get("changeProp"));
       const watchProps = traits.map((t) => t.getName());
       const events = watchProps.map((prop) => `change:${prop}`).join(" ");
 
       this._editableMap = Object.fromEntries(
-        traits.filter((t) => t.get("selector")).map((t) => [t.get("selector"), t.getName()])
+        traits
+          .filter((t) => t.get("selector"))
+          .map((t) => [t.get("selector"), t.getName()]),
       );
 
       if (events) {
         this.on(events, (m, v, opts) => {
           this.updateContent();
-          if (!opts?.fromRte) this.renderContent()
+          if (!opts?.fromRte) this.renderContent();
         });
       }
 
@@ -48,18 +56,23 @@ export default {
     },
 
     renderContent() {
-      const template = this.get("content")
+      const template = this.get("content");
       if (!template) return;
 
       const componentLabel = this.get("name") || this.cid;
 
       [...template.matchAll(/\{\{\s*(\w+)\s*\}\}/g)].forEach(([, key]) => {
         if (this.get(key) === undefined) {
-          console.warn(`[themed-block] "${componentLabel}": template references {{${key}}} but no such field is defined in defaults`);
+          console.warn(
+            `[themed-block] "${componentLabel}": template references {{${key}}} but no such field is defined in defaults`,
+          );
         }
       });
 
-      const html = template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, key) => this.get(key) ?? "");
+      const html = template.replace(
+        /\{\{\s*(\w+)\s*\}\}/g,
+        (_, key) => this.get(key) ?? "",
+      );
       this.components(html);
 
       this.wireEditableChildren();
@@ -67,13 +80,13 @@ export default {
 
     wireEditableChildren() {
       const componentLabel = this.get("name") || this.cid;
-      const editableMap = this._editableMap || {}
+      const editableMap = this._editableMap || {};
       const matchedSelectors = new Set();
 
       const walk = (children) => {
         children.forEach((child) => {
           const entry = Object.entries(editableMap).find(([selector]) =>
-            child.getClasses().includes(selector.replace(/^\./, ""))
+            child.getClasses().includes(selector.replace(/^\./, "")),
           );
 
           child.set({
@@ -93,7 +106,11 @@ export default {
             } else {
               child.off("rte:disable");
               child.on("rte:disable", () => {
-                this.set(prop, sanitizeRteHtml(child.getEl()?.innerHTML ?? ""), {fromRte: true})
+                this.set(
+                  prop,
+                  sanitizeRteHtml(child.getEl()?.innerHTML ?? ""),
+                  { fromRte: true },
+                );
               });
             }
           }
@@ -108,9 +125,11 @@ export default {
 
       Object.keys(editableMap).forEach((selector) => {
         if (!matchedSelectors.has(selector)) {
-          console.warn(`[themed-block] "${componentLabel}": selector "${selector}" matched no rendered element`);
+          console.warn(
+            `[themed-block] "${componentLabel}": selector "${selector}" matched no rendered element`,
+          );
         }
       });
-    }
+    },
   },
 };

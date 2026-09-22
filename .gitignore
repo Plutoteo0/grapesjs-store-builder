@@ -30,3 +30,6 @@ backend/data/*.save.json
 *.njsproj
 *.sln
 *.sw?
+
+backend/data/*.database.json
+backend/data/*.ejs

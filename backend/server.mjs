@@ -6,15 +6,14 @@ import { fileURLToPath } from "url";
 import { renderPage, getManifest } from "./services/page-renderer.mjs";
 import { readdir } from "fs/promises";
 import { getContent } from "./services/page-renderer.mjs";
+import ejs from "ejs";
+import { generateEjs } from "./services/ejs-generator.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, "..", "frontend", "public");
 const app = express();
 
-const ALLOWED_ORIGINS = [
-  "http://localhost:5173",
-  "http://localhost:5273",
-];
+const ALLOWED_ORIGINS = ["http://localhost:5173", "http://localhost:5273"];
 app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use(
   express.json({
@@ -216,6 +215,61 @@ app.get("/components/*", (req, res) => {
 
 app.get("/components.css", (req, res) => {
   res.sendFile(join(publicDir, "components.css"));
+});
+
+app.get("/store-ejs/:storeId/:pageSlug", async (req, res) => {
+  if (!isValidStoreId(req.params.storeId)) {
+    return res.status(400).json({ error: "Bad storeId" });
+  }
+  if (!isValidPageSlug(req.params.pageSlug)) {
+    return res.status(400).json({ error: "Invalid PageSlug" });
+  }
+  try {
+    const dbPath = join(
+      __dirname,
+      "data",
+      `${req.params.storeId}.database.json`,
+    );
+    const database = JSON.parse(await readFile(dbPath, "utf-8"));
+
+    const liveContent = await getContent(req.params.storeId);
+    for (const [type, raw] of Object.entries(liveContent)) {
+      if (raw && typeof raw === "object" && raw.dataSource) {
+        database.content[type] = {
+          ...database.content[type],
+          items: raw.items,
+        };
+      }
+    }
+
+    const ejsPath = join(
+      __dirname,
+      "data",
+      `${req.params.storeId}.${req.params.pageSlug}.ejs`,
+    );
+    const html = await ejs.renderFile(ejsPath, { database });
+
+    res.set("Content-Type", "text/html").send(html);
+  } catch (err) {
+    console.error(err);
+    res.status(404).json({ error: "Cant render page" });
+  }
+});
+
+app.post("/api/publish/:storeId/:pageSlug", async (req, res) => {
+  if (!isValidStoreId(req.params.storeId)) {
+    return res.status(400).json({ error: "Bad storeId" });
+  }
+  if (!isValidPageSlug(req.params.pageSlug)) {
+    return res.status(400).json({ error: "Invalid PageSlug" });
+  }
+  try {
+    await generateEjs(req.params.storeId, req.params.pageSlug);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to publish" });
+  }
 });
 
 app.listen(3001, () => {

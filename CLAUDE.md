@@ -1708,3 +1708,480 @@ canvas, publishing, and confirming `href="/store/acme/home"` on the real
    fully empty droppable container.
 3. Race condition on concurrent saves (last-write-wins) — still open,
    pre-launch blocker, unchanged from prior sessions.
+
+## EJS Generator + database.json — new parallel render path, phase 1 done, 2026-09-16
+
+**Why:** the existing `renderComponent()` (`page-renderer.mjs`) rebuilds the
+entire page — structure *and* data — from scratch on every single request.
+The internship supervisor specifically checked that a "live data, no file
+watcher, no restart" requirement actually holds, and flagged it as the
+priority item. Idea (see `ejs-generator-architecture.md`, the original design
+doc): split the two things that change at different speeds — **structure**
+(which components, wrapper/theme, nesting) regenerated once per explicit
+**Publish** click, versus **data** (field values, product prices) read fresh
+from a plain JSON file on every real page request, no watcher involved.
+
+**Deliberately kept as a second, parallel path — not a replacement.** The
+existing `renderComponent()` / `GET /store/:storeId/:pageSlug` stays exactly
+as-is (planned to become the "получить HTML" button next session, still
+using the old preview-publish command name for now — not renamed yet). The
+new path is `GET /store-ejs/:storeId/:pageSlug`, fully separate.
+
+### New files / routes
+
+- **`backend/services/ejs-generator.mjs`** (new) — `generateEjs(storeID, pageSlug)`.
+  Reuses `page-renderer.mjs`'s own building blocks rather than re-implementing
+  tree-walking from scratch: `getData`, `getContent`, `DEFAULT_WRAPPERS`,
+  `wrapWithTag`, `buildCssLinks` all had to be `export`ed (were module-private
+  before). `adapter()` gained a third optional param, `prefix = ""` — old call
+  sites in `renderComponent()` are unaffected (default keeps today's flat
+  `<%= field %>` output); the generator passes an explicit prefix so the
+  *same* function produces namespaced output instead of a second copy of the
+  regex logic.
+- **Namespacing decision:** generated leaf-component EJS references
+  `database.content['hero'].headingText`, not a flat `<%= headingText %>` —
+  deliberate, to avoid two component types on the same page colliding on an
+  identical field name once everything funnels into one `ejs.renderFile()`
+  call with one `database` local.
+- **`isDynamicContainer` (e.g. `pricing-cards`) does not bake concrete items
+  into the `.ejs` file** — that would defeat the entire point (structure
+  frozen at Publish time, data always live). Instead the generator writes a
+  literal `forEach` loop into the `.ejs` text itself:
+  `<% (database.content['pricing-cards'].items || []).forEach(function(item) { %>...<% }); %>`,
+  with the child (`pricing-card`) template adapted with `prefix = "item"`
+  (not `database.content['pricing-card']` — each card's values come from the
+  loop variable, not from a single shared config entry). Verified against 7
+  live mock products, then re-verified that editing `database.json`'s
+  `items` array by hand and re-requesting (no republish, no restart) picks up
+  the change immediately.
+- **`isContainer` (static, no `dataSource` — e.g. beta's `pricing-cards`
+  shape) is explicitly out of scope for phase 1** — `console.warn` +
+  skip, same warn-and-fallback pattern used elsewhere in this codebase
+  (never silently drop a node without a trace in the logs).
+- **`POST /api/publish/:storeId/:pageSlug`** (`server.mjs`) — thin route,
+  delegates entirely to `generateEjs()`, no logic of its own (same principle
+  as `/api/render`).
+- **`GET /store-ejs/:storeId/:pageSlug`** (`server.mjs`) — reads
+  `{storeId}.database.json` fresh off disk **inside the request handler**
+  (not into a module-level variable — that would cache it once at server
+  boot and defeat the whole point), then `ejs.renderFile()`s the
+  already-generated `{storeId}.{pageSlug}.ejs` against it.
+
+### Canvas edits now actually reach this path — closed a real gap same session
+
+First pass left a real hole, caught by the user mid-session, not by me:
+`generateEjs()` initially only wrote the `.ejs` structure — `database.json`'s
+field *values* were seeded once by hand (a throwaway one-off dump of
+`getContent("acme")`) and never touched again. That meant editing `hero` in
+the canvas (Traits panel **or** double-click RTE — both converge to the same
+place: `themed-block.js`'s `rte:disable` handler already syncs RTE edits back
+into the Trait/prop, so both end up as an ordinary top-level field on the
+saved node, same as a Traits-panel edit) had **zero effect** on `/store-ejs`,
+since the generated `.ejs` never reads `node` values at all, only
+`database.content[type]`.
+
+**Fixed:** `generateEjs()` now also merges, per Publish call, each
+template-shape node's actual saved values into `database.json`:
+`mergedContent[node.type] = { ...rawContent, ...node }` — same merge shape
+`renderComponent()`'s own leaf branch already does, just persisted to disk
+instead of recomputed per-request. `bodyEjs` itself is still built from the
+un-merged `content` (structure must stay value-agnostic) — only the
+`database.json` write uses `mergedContent`. Verified live: edited `hero`'s
+heading in the running canvas → autosave → `POST /api/publish/acme/home` →
+confirmed the new text landed in `acme.database.json` → confirmed
+`GET /store-ejs/acme/home` served it.
+
+**Known limitation, deliberately deferred:** `acme.database.json` is one file
+per **store**, while `*.save.json`/`*.ejs` are one per **page**. With only
+one page (`home`) today this doesn't bite, but a second page editing the same
+component type (e.g. its own `hero`) would collide on the same
+`database.content['hero']` key — last Publish wins, silently. Likely fix
+when this becomes real: make `database.json` per-page too
+(`{storeId}.{pageSlug}.database.json}`), matching `.ejs`'s own granularity.
+Not done — flagged, not blocking phase 1.
+
+**Also explicitly deferred, discussed but not decided:** how `pricing-cards`'
+`items` (the truly "admin/SQL-driven" data, as opposed to canvas-edited
+leaf fields) should get updated going forward — auto-refreshed as part of
+Publish (couples cadences again, defeats some of the point) vs. a fully
+separate route/mechanism (closer to the original doc's intent, admin panel
+territory, not built yet). Explicitly punted to a future session by the
+user's own call ("давай сначала доделаем то что должны").
+
+### Bugs caught during review this session (all fixed same session, not carried over)
+
+Same collaborative pattern as always — user writes, Claude reviews line by
+line before running anything:
+- `isDynamicContainer`/`isContainer` referenced but never computed in
+  `generatorComponentsEjs` (would have thrown `ReferenceError`).
+- Computed result stored in `leaf`, but the return statement referenced a
+  nonexistent `template` variable instead.
+- `generateEjs`'s per-node map call passed `depth + 1` where `depth` didn't
+  exist in that scope at all (`ReferenceError`).
+- `buildCssLinks(storeID)` called with only one argument; the real signature
+  needs `(storeID, data)` — would have thrown on `data.components` being
+  `undefined` inside that function.
+- `buildCssLinks`'s result (`Promise<string[]>`) used directly as a string
+  instead of `.join("\n")`-ed first.
+- `writeFile(join(__dirname, "..", data, ...).fileContent)` — two independent
+  bugs in one line: `data` (a variable, the page object) used where the
+  literal string `"data"` (directory name) was meant, and `.fileContent`
+  chained onto the `join()` result (a string, so this evaluated to
+  `undefined`) instead of passing the real `fileContent` variable as
+  `writeFile`'s second argument.
+- Stray unused `import { error } from "console"` in `server.mjs` — removed.
+- Repeatedly hit while testing (a process issue, not a code bug, but worth
+  remembering): the backend was run via plain `node server.mjs` (no
+  `--watch`, deliberately — `--watch` would auto-restart on every file save
+  and make it impossible to tell whether a request re-reads data live or
+  the whole process just relaunched). This means **every code edit to
+  `server.mjs`/`page-renderer.mjs`/`ejs-generator.mjs` during this session
+  required a manual server restart** before the next curl test — forgetting
+  this produced a stale-behavior false negative twice (old `console.warn`
+  text from before an edit still showing up in logs was the tell).
+
+### Verification approach — real HTTP end to end, not just scripts
+
+Three throwaway scripts (`tmp-ejs-test.mjs`, `tmp-dump-database.mjs`,
+`tmp-render-ejs.mjs`, all in `backend/`, not committed — to be deleted) were
+used to prove the generator and the EJS-against-`database.json` render in
+isolation first. But the actual "no watcher needed" claim was only trusted
+once proven through a real running `node server.mjs` (no `--watch`) via curl
+— matching this project's established habit (see the 2026-07-16/2026-08-20
+entries above) of never trusting "should work" without hitting the real
+route by hand. Specifically proven: (1) manually editing
+`acme.database.json`'s `hero.headingText` and re-requesting
+`GET /store-ejs/acme/home` with no republish/no restart showed the new value
+immediately; (2) same for `pricing-cards.items`; (3) a real canvas edit →
+autosave → `POST /api/publish` → `GET /store-ejs` round trip, proving the
+canvas-to-production path is actually wired, not just the manual-data path.
+
+**Next session:**
+1. Frontend buttons: rename `preview-publish` → **"получить HTML"** (old
+   `renderComponent` path, behavior unchanged), add a new **"Publish"**
+   button calling `POST /api/publish/:storeId/:pageSlug`.
+2. `isContainer` (static container shape, needed for `beta.json`'s
+   non-dynamic `pricing-cards`) — still unsupported in `ejs-generator.mjs`,
+   explicit scope cut for phase 1.
+3. Decide `database.json` update cadence for admin/SQL-style data
+   (`pricing-cards.items`) — deferred this session, see above.
+4. Revisit per-store vs. per-page `database.json` granularity once a second
+   page actually exists.
+5. Clean up: `tmp-ejs-test.mjs`, `tmp-dump-database.mjs`, `tmp-render-ejs.mjs`,
+   `tmp-server.log` in `backend/` — throwaway, not committed, delete before
+   or during next session's commit.
+
+## Publish button fixed, dynamic-container data made genuinely live, `database.json` dead-data finding — 2026-09-17
+
+**Item 1 above (Publish button) — done and verified end-to-end in a real
+browser**, not just read through: `editor.Commands.add("publish", {...})` +
+`editor.Panels.addButton("options", { id: "publish-btn", className: "fa
+fa-upload", command: "publish", ... })` in `App.jsx`. Two real bugs hit and
+fixed in review before this worked, both the same class of mistake — mixing
+up GrapesJS's two separate APIs (`Commands.add` registers logic,
+`Panels.addButton` adds the toolbar icon; they are not the same call and
+neither name is a synonym for the other): first attempt was
+`editor.command.addButton("publish", {...})` (wrong casing on `command`,
+and `addButton` isn't a `Commands` method at all), second attempt fixed the
+casing but still called `.add` where `Commands.add` was needed. Verified via
+`read_network_requests` in a live browser session (save → publish, both
+200), then confirmed on disk that `acme.database.json`/`acme.home.ejs`
+timestamps updated within seconds of the click, then loaded
+`GET /store-ejs/acme/home` directly and confirmed it matched the canvas.
+
+**Item 3 above resolved — dynamic-container data (`pricing-cards.items`)
+made genuinely live in `/store-ejs`, not frozen at Publish time.**
+
+Root cause, found by testing (changed a mock product title, restarted
+backend, confirmed `/api/content/acme` and the old `/store/acme/home`
+picked it up immediately, but `/store-ejs/acme/home` kept serving the old
+title until Publish was clicked again): `generateEjs()`'s
+`mergedContent = { ...content }` accidentally captured whatever `items`
+`getContent()` (which internally calls `resolveContent()` →
+`DATA_PROVIDERS`) happened to resolve *at the moment Publish was clicked*,
+then froze that into `database.json`. `/store-ejs` read `database.json`
+fresh on every request, but the file itself only changed on Publish — same
+class of staleness bug as the original "no watcher, no restart" concern,
+just relocated one level down.
+
+Consulted a second opinion (larger model) on the two candidate fixes before
+picking one: (A) resolve dynamic-container data at request time in the
+`/store-ejs` handler itself, keeping `database.json` for structural/leaf
+data only; (B) a separate, independently-triggered refresh route rewriting
+`database.json`'s dynamic fields, decoupled from Publish. Verdict: (A) is
+the only one that actually satisfies "live, no restart" as stated by the
+supervisor — (B) is a cache with no invalidation mechanism built yet (no
+cron, no admin panel), so shipping it now means shipping a known-stale path
+disguised as fixed. (A) was also confirmed to cost nothing relative to (B)
+on the "why does the EJS-file-split exist at all" question — EJS's compiled-
+template cache (`ejs.renderFile`) is keyed by file path, not by the data
+object passed in, so resolving `items` fresh per request doesn't touch that
+caching benefit at all.
+
+**Fix, implemented as (A), generically — not hardcoded to `products`/
+`pricing-cards`:**
+- `server.mjs`'s `/store-ejs/:storeId/:pageSlug` handler now does, right
+  after reading `database.json` off disk and before `ejs.renderFile()`:
+  ```js
+  const liveContent = await getContent(req.params.storeId);
+  for (const [type, raw] of Object.entries(liveContent)) {
+    if (raw && typeof raw === "object" && raw.dataSource) {
+      database.content[type] = { ...database.content[type], items: raw.items };
+    }
+  }
+  ```
+  This loops over whatever `getContent()`/`resolveContent()` already
+  resolves generically (any number of `dataSource`-declaring types, not
+  just `pricing-cards`) and overlays fresh `items` onto the structural
+  object read from disk. Adding a second dynamic data type in the future
+  (new provider file + `DATA_PROVIDERS` entry + `dataSource` in a store's
+  content config — the same 3-step pattern already established for
+  `products`) requires zero changes to this loop.
+- `ejs-generator.mjs`'s `generateEjs()` no longer lets stale `items` sit in
+  `database.json` at all — after building `mergedContent`, a loop strips
+  `items` from any entry with a `dataSource` (`items: undefined`, which
+  `JSON.stringify` omits entirely from the written file) before the
+  `writeFile`. Not load-bearing for correctness after the fix above (the
+  request-time overlay would clobber a stale value anyway), but removes a
+  trap for the next person reading the file by hand.
+
+Verified live, twice: (1) changed a mock product's title, confirmed
+`acme.database.json` has **no `items` key at all** for `pricing-cards`
+(`grep -c '"items"'` → 0) yet `/store-ejs/acme/home` still rendered the new
+title correctly — proof the data can only be coming from the live
+request-time merge, not the file. (2) Added an entirely new mock product
+(new array entry, not just an edited title) and confirmed it appeared on
+`/store-ejs/acme/home` after a plain backend restart, with **zero** calls
+to `/api/publish`.
+
+**Clarified for the record (came up as a real question this session, worth
+keeping): why did a restart get involved at all, if this is supposed to be
+"live, no restart"?** `MOCK_PRODUCTS` is a `const` baked directly into
+`products.mjs` — actual JS source, not external data — so Node loads it
+into memory once at process start (ESM has no live-reload without
+`--watch`, which this project deliberately runs without, see the earlier
+2026-09-16 note on why). A real SQL-backed `getProducts()` doesn't have
+this problem at all, because a DB query genuinely re-executes on every
+call — there's nothing to go stale in memory. The "no restart" guarantee
+was never violated architecturally; the mock just happens to double as both
+"data" and "code" in one file, which a real database never does. **Next
+step, in progress, not finished this session:** move `MOCK_PRODUCTS`'s
+array out of `products.mjs` into a `backend/data/products.json` file, and
+have `getProducts()` read it via `fs.readFile` (same live-read pattern
+`database.json` itself already uses) instead of importing a constant — a
+cheap way to prove the "external data source, no restart" property end to
+end on the current stack, without standing up a real database yet.
+
+**New finding, not yet fixed — `database.json` currently holds the store's
+entire type registry, not just the current page's types.** Caught by
+inspection, not a functional bug: `acme.database.json` (for the `home`
+page, whose real saved components are only `header`/`hero`/`testimonial`/
+`footer`/`pricing-cards`) also contains full config entries for
+`newsletter`/`layout-comp`/`layout-slot`/`header-layout` — none of which
+are on this page at all. Cause: `generateEjs()`'s
+`content = await getContent(storeID)` returns every type ever registered
+for the store (all of `acme.json`'s `content` map), and
+`mergedContent = { ...content }` copies all of it before the merge loop
+narrows only the entries that match `data.components`. The extra entries
+are provably inert — `bodyEjs` is built purely by mapping over
+`data.components` (the real page tree), so nothing ever reads
+`database.content['newsletter']` when `newsletter` isn't on the page — but
+the file's *shape* is misleading: it looks like "what's on this page," and
+isn't. Cost real back-and-forth this session tracing that down.
+
+Consulted a second opinion on whether to fix this immediately or defer:
+verdict was defer *briefly* — finish the in-progress `products.json` task
+first (the supervisor-facing deliverable), then do this as the very next
+small task, not "someday." Sketch of the fix, when picked up: `export`
+`collectUsedTypes`/`getAllTypes` from `page-renderer.mjs` (currently
+module-private, same treatment already given to `getData`/`getContent`/
+`wrapWithTag`/`adapter`/`buildCssLinks`), build the real used-type set from
+`data.components` in `generateEjs()`, and filter *the object being written*
+to `database.json` down to that set right before `writeFile` — **not**
+`mergedContent` itself, since `content`/`mergedContent` is also what
+`bodyEjs` is built from and needs every type available during generation.
+**Explicit gotcha, easy to miss:** `getAllTypes`/`collectUsedTypes` only
+walk `node.components` (real saved children) — a dynamic container's
+children (`pricing-card` under `pricing-cards`) are *not* in
+`node.components`, they're synthesized from `items`+`childType` at generate
+time. A naive filter would find `pricing-cards` in the used-type set but
+never `pricing-card`, and incorrectly drop `content['pricing-card']` (whose
+`.template` the dynamic-container branch needs at generate time) — so the
+used-type set must be extended with `rawContent.childType` for every type
+in the set that has a `dataSource`. This bug would previously have been
+invisible if introduced via `buildCssLinks` (its only current consumer),
+purely by luck: `pricing-card` has no `cssUrl`, so its absence from that
+function's set never mattered there. Likely lands in the same sitting as
+the per-store-vs-per-page `database.json` split already tracked below
+(item 4) — that refactor has to decide what belongs in each file anyway,
+and "only this page's used types (plus dynamic-container child types)" is
+the answer to both questions at once. **This is a different problem from
+item 4/3 below** — this one is inert-but-confusing dead data with zero
+effect on correctness; the per-store-vs-per-page granularity issue is a
+real multi-page value-collision bug. Don't conflate them when picking this
+back up.
+
+**Also confirmed this session, not a new bug — an already-known scope cut
+biting from a different angle:** nesting `hero` (or any leaf/template-shape
+component) inside `header-layout`/`layout-slot`/`layout-comp` causes it to
+vanish entirely on `/store-ejs`, not just render with stale data — because
+all three are `isContainer`-shape (`{ wrapper: {...} }`, no `template`, no
+`dataSource`) and `ejs-generator.mjs`'s `isContainer` branch
+(`console.warn` + `return ""`) drops the whole subtree, same as item 2 above
+already flags for `beta.json`'s static `pricing-cards`. The old
+`/store/:storeId/:pageSlug` path (`page-renderer.mjs`) still renders nested
+content in a static container correctly (it has real recursive support for
+`isContainer`) — this gap is specific to the new EJS path, and is exactly
+what item 2's "isContainer... unsupported in ejs-generator.mjs" backlog
+entry already covers. No new backlog item needed, just noting the concrete
+symptom (a component silently disappearing, not merely going stale) for
+whoever picks up item 2.
+
+**Next session:**
+1. Finish moving `MOCK_PRODUCTS` out of `products.mjs` into
+   `backend/data/products.json`, read via `fs.readFile` in `getProducts()`
+   — in progress, interrupted mid-session by the `database.json` dead-data
+   finding above.
+2. Filter `database.json` down to the current page's actually-used types
+   (see sketch above) — do this right after item 1, not deferred further.
+   Remember the dynamic-container `childType` gotcha.
+3. `isContainer` (static container shape) — still unsupported in
+   `ejs-generator.mjs`. Now confirmed to affect not just `beta.json`'s
+   static `pricing-cards` but also anything nested inside
+   `header-layout`/`layout-slot`/`layout-comp` on the EJS path.
+4. Revisit per-store vs. per-page `database.json` granularity once a second
+   page actually exists — likely the same sitting as item 2.
+5. Clean up: `tmp-ejs-test.mjs`, `tmp-dump-database.mjs`, `tmp-render-ejs.mjs`,
+   `tmp-server.log` in `backend/` — still not deleted.
+
+## `isContainer` support in `ejs-generator.mjs` + per-instance `componentID` — 2026-09-19
+
+**Item 3 from the previous backlog (`isContainer` unsupported in the EJS
+path) — done.** `products.mjs` → `products.json` migration (previous item 1)
+was already finished coming into this session (confirmed: `getProducts()`
+reads `backend/data/products.json` via `fs.readFile`, no in-memory mock
+left) — not re-touched today.
+
+**What shipped:**
+- `generatorComponentsEjs()`'s `isContainer` branch in `ejs-generator.mjs`
+  now actually recurses into `node.components` and renders real nested
+  content, instead of `console.warn` + `return ""`. Fixes the exact gap
+  flagged at the end of the previous session — nesting anything inside
+  `header-layout`/`layout-slot`/`layout-comp`, or beta's static
+  `pricing-cards`, no longer silently vanishes on `/store-ejs`.
+- Getting there took several review passes, all on real bugs (order of
+  `await`/`Promise.all`/`.join`, wrong function called recursively instead
+  of itself, missing `return` in a `.map()` callback) — none survived to
+  the final version, each caught by re-reading the diff, not by running it
+  first.
+
+**Bigger finding along the way, not originally scoped for today: a real
+architectural gap in how multiple instances of the same component type share
+data.** Testing `isContainer` surfaced that `database.json` was keyed **by
+component type**, not by instance — every node of a given type on a page
+(e.g. two `testimonial`s, one top-level and one nested inside
+`header-layout`) generated EJS that pointed at the exact same
+`database.content['testimonial']` key. Proven by hand: editing that one key
+changed *both* testimonials on the real `/store-ejs` route at once — not a
+theoretical concern, reproduced on the actual page.
+
+Consulted a larger model twice on this, deliberately as neutral-as-possible
+prompts (laid out both sides, didn't lead toward an answer):
+1. **Should same-type instances share one data slot, or get independent
+   data?** → independent, decisively. Reasoning: the old `/store/...` render
+   path already treats every instance independently (data inline per node),
+   so the EJS path's shared-by-type behavior was a regression relative to that,
+   not a deliberate simplification. A true "linked/master" concept is a
+   separate, opt-in feature with its own UI (Figma components, Notion synced
+   blocks) — never the default for "typed the same type twice."
+2. **Follow-up: should GrapesJS's built-in "duplicate" (copy) button keep
+   the same data as the original, or fork to independent data?** → fork,
+   decisively, same reasoning — every mainstream tool's duplicate/copy-paste
+   gives an independent copy by default; linking is the deliberate exception.
+
+**Fix, built and verified end-to-end in a real browser + real `/store-ejs`
+requests, not just read through:**
+- `themed-block.js`'s `init()` — every component gets a stable
+  `componentID` (`crypto.randomUUID()`), generated once on first creation
+  (`if (!this.get("componentID"))`, same bake-once guard shape as
+  `pricing-cards.js`'s children), persisted through save/reload since it's
+  a plain model prop `toJSON()` serializes like any other.
+- **Deliberately not reusing either of GrapesJS's two existing "id"
+  concepts** — `component.get("id")` is already claimed by `pricing-card`
+  for the dynamic container's real business id (from `products.json`,
+  overwritten on every data resync) and would collide/get clobbered;
+  `attributes.id` is the real DOM `id`, already used by the Style Manager's
+  class-vs-id targeting trick (`layout-slot`'s `flex-grow`, 2026-08-22) and
+  risks unintended CSS/JS side effects if reused. `componentID` is a third,
+  dedicated field, untouched by either existing mechanism.
+- **`App.jsx`, registered next to the `linkTo` trait** —
+  `editor.on("component:clone", (clone) => { if (clone.get("componentID"))
+  clone.set("componentID", crypto.randomUUID()); })`. Confirmed by testing
+  (before writing the fix) that GrapesJS's built-in duplicate command
+  (`tlb-clone`) copies `componentID` onto the clone verbatim, and that
+  `component:clone` already fires once per node in the cloned subtree
+  (bottom-up) — so no manual recursion into children is needed; the guard
+  naturally skips plain `text`/`textnode` children, which never carry a
+  `componentID` since they don't extend `themed-block`.
+- `ejs-generator.mjs` — leaf branch now emits
+  `database.content['${node.componentID}']` instead of
+  `database.content['${node.type}']`. `generateEjs()`'s merge step
+  (`collectLeafData()`) is now a recursive tree walk (mirrors
+  `page-renderer.mjs`'s `collectUsedTypes` pattern) instead of a flat
+  `data.components.forEach` — needed because leaf-shape nodes can now be
+  arbitrarily nested inside `isContainer` chains, not just top-level.
+- **`isDynamicContainer` (`pricing-cards` with a real `dataSource`)
+  deliberately left keyed by type, not migrated to `componentID`** — user's
+  call: that data is source-of-truth/provider-driven, not per-instance
+  editorial content, so type-scoping is the correct model there, unlike the
+  editorial-content case this session actually fixed.
+- **Verified live, not just read:** two `testimonial`s (top-level +
+  nested) now generate distinct `database.content[...]` keys; manually
+  edited only the nested one's `quote` in `acme.database.json` and
+  confirmed via `GET /store-ejs/acme/home` that only that one changed, the
+  top-level one stayed on its original text. Also verified the
+  `component:clone` fix directly in a live browser session (console-driven,
+  via `editor.runCommand('tlb-clone')`) — clone gets a fresh id, original
+  keeps its own, all descendants get their own too.
+- **Operational note for next time a store's existing saved page is
+  touched:** any node saved *before* this session's `themed-block.js`
+  change has no `componentID` in `*.save.json` yet — it only gets backfilled
+  the next time that page is opened in the editor (each component's own
+  `init()` runs, generates one, and it reaches disk on the next autosave).
+  `acme.home.save.json` is already migrated (opened + autosaved during this
+  session's testing) — `beta` has no saved pages yet, not affected.
+- **Test-data cleanup, same session:** earlier browser-console testing
+  (`tlb-clone` fired manually to probe event behavior) accidentally left 3
+  duplicate `testimonial` nodes autosaved into the real
+  `acme.home.save.json`. Caught by inspection, fixed by hand (kept one,
+  stripped the stale test `componentID` so it regenerates cleanly) — tree
+  confirmed back to its original shape (1 top-level + 1 nested testimonial)
+  before moving on.
+- **Also found mid-session, unrelated to today's actual work:** the backend
+  had a second, stale `node server.mjs` process left over from earlier in
+  the session, still bound to port 3001 from a previous `npm run start`
+  that a plain `pkill -f "node server.mjs"` failed to match (a Windows
+  process-matching quirk under git-bash's `pkill`) — every "restart and
+  retest" cycle was silently hitting the old, un-rebuilt code until this
+  was caught by comparing the generated file's actual content against what
+  the new code should have produced. Fixed by finding the real PID via
+  `netstat -ano | grep :3001` and `taskkill //F //PID`. Worth remembering:
+  on Windows, confirm a backend "restart" actually rebound the port before
+  trusting a retest's result, don't just trust that a `pkill`-by-name
+  succeeded.
+
+**Next session:**
+1. Filter `database.json` down to the current page's actually-used types
+   (dead-data finding from 2026-09-17) — still open, not touched this
+   session; the `componentID` migration makes this slightly different now
+   (need to filter by which *instances* are actually on the page, not just
+   which *types*, since the file now also carries stale type-keyed base
+   entries alongside the new componentID-keyed ones).
+2. Decide whether/how to migrate `beta.json`'s `pricing-cards` to
+   `dataSource` (deferred repeatedly, still not done).
+3. Revisit per-store vs. per-page `database.json` granularity once a second
+   page actually exists.
+4. Race condition on concurrent saves (last-write-wins) — still open,
+   pre-launch blocker, unchanged from prior sessions.
+5. Clean up: `tmp-ejs-test.mjs`, `tmp-dump-database.mjs`, `tmp-render-ejs.mjs`,
+   `tmp-server.log` in `backend/` — still not deleted, growing stale.

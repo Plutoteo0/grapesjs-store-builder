@@ -18,8 +18,6 @@ function buildPayload(editor) {
   };
 }
 
-
-
 export default function App() {
   const [modules, setModules] = useState(null);
   const [cssUrls, setCssUrls] = useState([]);
@@ -33,10 +31,10 @@ export default function App() {
    * @returns {Promise<void>}
    */
   async function getPages() {
-      const res = await fetch(`${API_BASE}/api/pages/${STORE_ID}`);
-      const data = await res.json();
-      return data.slugs;
-    }
+    const res = await fetch(`${API_BASE}/api/pages/${STORE_ID}`);
+    const data = await res.json();
+    return data.slugs;
+  }
 
   async function loadPages() {
     const slugs = await getPages();
@@ -44,17 +42,16 @@ export default function App() {
   }
 
   useEffect(() => {
-
-  /**
-   * Dynamically imports a component module by URL — fetches it as text,
-   * wraps it in a Blob, and `import()`s the Blob URL.
-   *
-   * Needed because Vite blocks `import()` from `public/` directly in dev
-   * mode; this workaround isn't needed in production, but works there too.
-   *
-   * @param {string} url
-   * @returns {Promise<{default: object}>} the module's namespace object
-   */
+    /**
+     * Dynamically imports a component module by URL — fetches it as text,
+     * wraps it in a Blob, and `import()`s the Blob URL.
+     *
+     * Needed because Vite blocks `import()` from `public/` directly in dev
+     * mode; this workaround isn't needed in production, but works there too.
+     *
+     * @param {string} url
+     * @returns {Promise<{default: object}>} the module's namespace object
+     */
     async function importFromUrl(url) {
       const response = await fetch(url);
       const text = await response.text();
@@ -67,14 +64,14 @@ export default function App() {
       }
     }
 
-  /**
-   * Fetches this store's manifest + resolved content, dynamically imports
-   * every component module the manifest lists (in order — child types must
-   * come before their containers, see plugin.js), and stores the results in
-   * React state for GjsEditor to consume via pluginsOpts.
-   *
-   * @returns {Promise<void>}
-   */
+    /**
+     * Fetches this store's manifest + resolved content, dynamically imports
+     * every component module the manifest lists (in order — child types must
+     * come before their containers, see plugin.js), and stores the results in
+     * React state for GjsEditor to consume via pluginsOpts.
+     *
+     * @returns {Promise<void>}
+     */
     async function loadComponents() {
       const content = await fetch(`${API_BASE}/api/content/${STORE_ID}`).then(
         (r) => r.json(),
@@ -94,20 +91,20 @@ export default function App() {
     }
     loadComponents();
 
-    getPages().then(setPages)
+    getPages().then(setPages);
   }, []);
 
-/**
- * Switches to a different page of the same store by reassigning
- * `window.location.search` — a full page reload, not a React state update.
- *
- * Deliberate: `STORE_ID`/`pageSlug` are module-level consts read once from
- * the query string on load, not React state, so there's no in-place way to
- * "hot-swap" pages inside an already-mounted editor instance without a
- * bigger refactor. A reload is simple and correct, if not instant.
- *
- * @param {string} newSlug - the page slug to switch to
- */
+  /**
+   * Switches to a different page of the same store by reassigning
+   * `window.location.search` — a full page reload, not a React state update.
+   *
+   * Deliberate: `STORE_ID`/`pageSlug` are module-level consts read once from
+   * the query string on load, not React state, so there's no in-place way to
+   * "hot-swap" pages inside an already-mounted editor instance without a
+   * bigger refactor. A reload is simple and correct, if not instant.
+   *
+   * @param {string} newSlug - the page slug to switch to
+   */
   function handlePageChange(newSlug) {
     const params = new URLSearchParams(window.location.search);
     params.set("pageSlug", newSlug);
@@ -126,23 +123,23 @@ export default function App() {
           const pages = await fetch(`${API_BASE}/api/pages/${STORE_ID}`)
             .then((r) => (r.ok ? r.json() : { slugs: [] }))
             .catch(() => ({ slugs: [] }));
-          
+
           /**
-            * Custom "linkTo" trait type — a <select> of page slugs for this store,
-            * whose value is a full `/store/:storeId/:slug` href (not a bare slug).
-            * Used on header's nav-link traits (homeHref/aboutHref/etc.) instead of a
-            * plain text trait, so a link always points at a real page.
-            *
-            * `createInput`/`onEvent`/`onUpdate` are the contract GrapesJS requires for
-            * any custom trait type — not optional boilerplate:
-            * - `createInput` builds the DOM once.
-            * - `onEvent` is the UI → model direction (fires on the select's native
-            *   `change` event).
-            * - `onUpdate` is the model → UI direction (fires on a programmatic
-            *   `component.set()`, e.g. during `editor.setComponents()` on page load) —
-            *   without it, a restored page would always show the first `<option>`
-            *   regardless of the trait's real saved value.
-            */
+           * Custom "linkTo" trait type — a <select> of page slugs for this store,
+           * whose value is a full `/store/:storeId/:slug` href (not a bare slug).
+           * Used on header's nav-link traits (homeHref/aboutHref/etc.) instead of a
+           * plain text trait, so a link always points at a real page.
+           *
+           * `createInput`/`onEvent`/`onUpdate` are the contract GrapesJS requires for
+           * any custom trait type — not optional boilerplate:
+           * - `createInput` builds the DOM once.
+           * - `onEvent` is the UI → model direction (fires on the select's native
+           *   `change` event).
+           * - `onUpdate` is the model → UI direction (fires on a programmatic
+           *   `component.set()`, e.g. during `editor.setComponents()` on page load) —
+           *   without it, a restored page would always show the first `<option>`
+           *   regardless of the trait's real saved value.
+           */
           editor.Traits.addType("linkTo", {
             createInput({ trait }) {
               const select = document.createElement("select");
@@ -161,6 +158,12 @@ export default function App() {
             onUpdate({ elInput, component, trait }) {
               elInput.value = component.get(trait.get("name")) || "";
             },
+          });
+
+          editor.on("component:clone", (clone) => {
+            if (clone.get("componentID")) {
+              clone.set("componentID", crypto.randomUUID());
+            }
           });
 
           const saved = await fetch(
@@ -187,7 +190,6 @@ export default function App() {
           });
 
           editor.Commands.add("preview-publish", {
-
             /**
              * Saves the current editor state and opens a preview of the rendered page
              * in a new tab.
@@ -263,23 +265,47 @@ export default function App() {
                 window.alert("Incorrect page name");
                 return;
               }
-              await loadPages()
+              await loadPages();
               window.alert(
                 `Page was created to navigate use ?pageSlug=${slug}`,
               );
             },
           });
+          editor.Commands.add("publish", {
+            async run(editor) {
+              const payload = buildPayload(editor);
+              await fetch(`${API_BASE}/api/save/${STORE_ID}/${pageSlug}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+              });
+              const res = await fetch(
+                `${API_BASE}/api/publish/${STORE_ID}/${pageSlug}`,
+                {
+                  method: "POST",
+                },
+              );
+              if (!res.ok) return window.alert("Publish failed");
+              window.alert("Published");
+            },
+          });
           editor.Panels.addButton("options", {
-            id: "preview-publish-btn",
+            id: "preview-btn",
             className: "fa fa-rocket",
             command: "preview-publish",
-            attributes: { title: "Preview & Publish" },
+            attributes: { title: "Preview" },
           });
           editor.Panels.addButton("options", {
             id: "create-page-btn",
             className: "fa fa-file",
             command: "create-page",
             attributes: { title: "Create new page" },
+          });
+          editor.Panels.addButton("options", {
+            id: "publish-btn",
+            className: "fa fa-upload",
+            command: "publish",
+            attributes: { title: "Publish" },
           });
         }}
         options={{
@@ -296,27 +322,69 @@ export default function App() {
               {
                 name: "General",
                 open: false,
-                properties: ["display", "float", "position", "top", "right", "left", "bottom"],
+                properties: [
+                  "display",
+                  "float",
+                  "position",
+                  "top",
+                  "right",
+                  "left",
+                  "bottom",
+                ],
               },
               {
                 name: "Flex",
                 open: false,
-                properties: ["flex-direction", "flex-wrap", "justify-content", "align-items", "align-content", "order", "flex-basis", "flex-grow", "flex-shrink", "align-self"],
+                properties: [
+                  "flex-direction",
+                  "flex-wrap",
+                  "justify-content",
+                  "align-items",
+                  "align-content",
+                  "order",
+                  "flex-basis",
+                  "flex-grow",
+                  "flex-shrink",
+                  "align-self",
+                ],
               },
               {
                 name: "Dimension",
                 open: false,
-                properties: ["width", "height", "max-width", "min-height", "margin", "padding"],
+                properties: [
+                  "width",
+                  "height",
+                  "max-width",
+                  "min-height",
+                  "margin",
+                  "padding",
+                ],
               },
               {
                 name: "Typography",
                 open: false,
-                properties: ["font-family", "font-size", "font-weight", "font-style", "letter-spacing", "color", "line-height", "text-align", "text-shadow"],
+                properties: [
+                  "font-family",
+                  "font-size",
+                  "font-weight",
+                  "font-style",
+                  "letter-spacing",
+                  "color",
+                  "line-height",
+                  "text-align",
+                  "text-shadow",
+                ],
               },
               {
                 name: "Decorations",
                 open: false,
-                properties: ["background-color", "border-radius", "border", "box-shadow", "background"],
+                properties: [
+                  "background-color",
+                  "border-radius",
+                  "border",
+                  "box-shadow",
+                  "background",
+                ],
               },
               {
                 name: "Extra",

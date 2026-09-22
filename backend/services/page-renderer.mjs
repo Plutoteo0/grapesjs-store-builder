@@ -14,7 +14,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * @param {string} pageSlug
  * @returns {Promise<{components: object[], html: string, css: string}>} the full saved editor state
  */
-async function getData(storeID, pageSlug) {
+export async function getData(storeID, pageSlug) {
   const path = join(
     __dirname,
     "..",
@@ -141,7 +141,7 @@ function getAllTypes(nodes) {
  * @returns {Promise<string[]>} `<link rel="stylesheet" href="...">` strings, in
  *   load order — consumed by `renderPage` to build the page's `<head>`.
  */
-async function buildCssLinks(storeID, data) {
+export async function buildCssLinks(storeID, data) {
   const cssUrls = new Array();
 
   const manifest = await getManifest(storeID);
@@ -161,7 +161,7 @@ async function buildCssLinks(storeID, data) {
   return linkUrls;
 }
 
-const DEFAULT_WRAPPERS = {
+export const DEFAULT_WRAPPERS = {
   header: { tag: "header", classPrefix: "header" },
   footer: { tag: "footer", classPrefix: "footer" },
   hero: { tag: "section", classPrefix: "hero" },
@@ -200,13 +200,14 @@ const DEFAULT_WRAPPERS = {
  * @param {string[]} [richTextFields] - field names allowed to carry raw HTML
  * @returns {string} EJS-ready template string
  */
-function adapter(str, richTextFields = []) {
+export function adapter(str, richTextFields = [], prefix = "") {
   return str.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, key) => {
-    return richTextFields.includes(key) ? `<%- ${key} %>` : `<%= ${key} %>`;
+    const ref = prefix ? `${prefix}.${key}` : key;
+    return richTextFields.includes(key) ? `<%- ${ref} %>` : `<%= ${ref} %>`;
   });
 }
 
-/** 
+/**
  * Sanitezes a rte field value, allowing only a limited set of HTML tags and no attributes (Used against XSS attacks).
  * @param {string} value - RTE field value to sanitize.
  * @returns {string} Sanitized HTML string
@@ -233,7 +234,7 @@ const THEME_RE = /^[a-z0-9-]+$/;
  * @param {string} innerHtml - already-rendered inner content to wrap
  * @returns {string} `<tag class="...">innerHtml</tag>`
  */
-function wrapWithTag(wrapper, node, innerHtml) {
+export function wrapWithTag(wrapper, node, innerHtml) {
   const classes = node.classes || [];
   let theme = "";
 
@@ -291,16 +292,16 @@ async function renderComponent(node, content, depth = 0) {
     );
   }
 
-// isDynamicContainer branch
-// True when rawContent is an object with a dataSource key (e.g. pricing-cards
-// after resolveContent attached real items — see content-resolver.mjs).
-// Builds synthetic child nodes from rawContent.items (the live data) + childType
-// (e.g. "pricing-card"), NOT from node.components (the saved snapshot) — this is
-// deliberate: production render always uses fresh data, never a stale saved copy
-// Each synthetic child renders recursively through renderComponent
-// itself — a dynamic pricing-card child goes through the exact same template/EJS
-// path as any other node, no special-casing needed there.
-// Result wrapped via wrapWithTag same as every other branch.
+  // isDynamicContainer branch
+  // True when rawContent is an object with a dataSource key (e.g. pricing-cards
+  // after resolveContent attached real items — see content-resolver.mjs).
+  // Builds synthetic child nodes from rawContent.items (the live data) + childType
+  // (e.g. "pricing-card"), NOT from node.components (the saved snapshot) — this is
+  // deliberate: production render always uses fresh data, never a stale saved copy
+  // Each synthetic child renders recursively through renderComponent
+  // itself — a dynamic pricing-card child goes through the exact same template/EJS
+  // path as any other node, no special-casing needed there.
+  // Result wrapped via wrapWithTag same as every other branch.
   const isDynamicContainer =
     rawContent && typeof rawContent === "object" && rawContent.dataSource;
 
@@ -317,14 +318,14 @@ async function renderComponent(node, content, depth = 0) {
     return wrapWithTag(wrapper, node, childrenHtml);
   }
 
-// isContainer branch
-// True when rawContent is an object without a template key and without dataSource
-// (e.g. static pricing-cards on beta.json — cards: [...] baked in by hand, not
-// dynamic). Unlike isDynamicContainer above, this DOES read node.components — the
-// actual saved child nodes (e.g. pricing-card instances the editor baked in via
-// its own init(), see pricing-cards.js) — because there's no live data source to
-// rebuild from; the saved snapshot IS the data.
-// Renders each saved child recursively, joins, wraps same as every other branch.
+  // isContainer branch
+  // True when rawContent is an object without a template key and without dataSource
+  // (e.g. static pricing-cards on beta.json — cards: [...] baked in by hand, not
+  // dynamic). Unlike isDynamicContainer above, this DOES read node.components — the
+  // actual saved child nodes (e.g. pricing-card instances the editor baked in via
+  // its own init(), see pricing-cards.js) — because there's no live data source to
+  // rebuild from; the saved snapshot IS the data.
+  // Renders each saved child recursively, joins, wraps same as every other branch.
   const isContainer =
     rawContent && typeof rawContent === "object" && !rawContent.template;
 
@@ -338,20 +339,20 @@ async function renderComponent(node, content, depth = 0) {
     ).join("");
     return wrapWithTag(wrapper, node, childrenHtml);
   }
-  
-// template render block (final branch — plain string content vs { template, ... })
-// If rawContent is a plain string (content-shape 1, e.g. footer's fixed markup) —
-// no {{}} placeholders, template = rawContent as-is, data = node directly.
-// Otherwise (shape 2, { template, ...fields }) — template runs through adapter()
-// (mustache → EJS), and data merges content[type]'s own default field values with
-// node's actual saved values ({ ...defaultsFromContent, ...node }): GrapesJS's
-// toJSON() only serializes trait fields that differ from their default, so an
-// untouched field is missing from node entirely — EJS's `with(locals)` would throw
-// ReferenceError on a genuinely missing key. This merge fills that gap: edited
-// fields win (from node), untouched ones fall back to the store's own default.
-// richTextFields listed on rawContent get sanitized (sanitizeRichField) before
-// rendering — required since adapter() emitted them as unescaped <%- %>.
-// Renders via ejs.render(template, data), wraps result same as every branch.
+
+  // template render block (final branch — plain string content vs { template, ... })
+  // If rawContent is a plain string (content-shape 1, e.g. footer's fixed markup) —
+  // no {{}} placeholders, template = rawContent as-is, data = node directly.
+  // Otherwise (shape 2, { template, ...fields }) — template runs through adapter()
+  // (mustache → EJS), and data merges content[type]'s own default field values with
+  // node's actual saved values ({ ...defaultsFromContent, ...node }): GrapesJS's
+  // toJSON() only serializes trait fields that differ from their default, so an
+  // untouched field is missing from node entirely — EJS's `with(locals)` would throw
+  // ReferenceError on a genuinely missing key. This merge fills that gap: edited
+  // fields win (from node), untouched ones fall back to the store's own default.
+  // richTextFields listed on rawContent get sanitized (sanitizeRichField) before
+  // rendering — required since adapter() emitted them as unescaped <%- %>.
+  // Renders via ejs.render(template, data), wraps result same as every branch.
   let template, data;
   if (typeof rawContent === "string") {
     template = rawContent;
@@ -374,7 +375,7 @@ async function renderComponent(node, content, depth = 0) {
 
 /**
  * Renders a full page to an HTML string.
- * 
+ *
  * @param {string} storeID - identifies which store config to read (data/<storeID>.json) and which saved page to load (data/<storeID>.<pageSlug>.save.json)
  * @param {string} pageSlug - the slug of the page to render
  * @param {{components: object[], html: string, css: string}} [payload] - optional live editor state
