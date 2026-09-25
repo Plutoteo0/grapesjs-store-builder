@@ -162,7 +162,11 @@ export default function App() {
 
           editor.on("component:clone", (clone) => {
             if (clone.get("componentID")) {
-              clone.set("componentID", crypto.randomUUID());
+              const type = clone.get("type") || "component";
+              clone.set(
+                "componentID",
+                `${type}-${crypto.randomUUID().slice(0, 8)}`,
+              );
             }
           });
 

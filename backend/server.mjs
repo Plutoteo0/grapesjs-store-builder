@@ -225,18 +225,18 @@ app.get("/store-ejs/:storeId/:pageSlug", async (req, res) => {
     return res.status(400).json({ error: "Invalid PageSlug" });
   }
   try {
-    const dbPath = join(
+    const dataPath = join(
       __dirname,
       "data",
-      `${req.params.storeId}.database.json`,
+      `${req.params.storeId}.${req.params.pageSlug}.page-data.json`,
     );
-    const database = JSON.parse(await readFile(dbPath, "utf-8"));
+    const pageData = JSON.parse(await readFile(dataPath, "utf-8"));
 
     const liveContent = await getContent(req.params.storeId);
     for (const [type, raw] of Object.entries(liveContent)) {
       if (raw && typeof raw === "object" && raw.dataSource) {
-        database.content[type] = {
-          ...database.content[type],
+        pageData.content[type] = {
+          ...pageData.content[type],
           items: raw.items,
         };
       }
@@ -247,7 +247,7 @@ app.get("/store-ejs/:storeId/:pageSlug", async (req, res) => {
       "data",
       `${req.params.storeId}.${req.params.pageSlug}.ejs`,
     );
-    const html = await ejs.renderFile(ejsPath, { database });
+    const html = await ejs.renderFile(ejsPath, { pageData });
 
     res.set("Content-Type", "text/html").send(html);
   } catch (err) {

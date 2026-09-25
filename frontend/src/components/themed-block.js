@@ -17,7 +17,8 @@ export default {
 
     init() {
       if (!this.get("componentID")) {
-        this.set("componentID", crypto.randomUUID());
+        const type = this.get("type") || "component";
+        this.set("componentID", `${type}-${crypto.randomUUID().slice(0, 8)}`);
       }
 
       const traits = this.getTraits().filter((t) => t.get("changeProp"));

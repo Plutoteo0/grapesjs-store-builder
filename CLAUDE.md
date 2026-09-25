@@ -2170,18 +2170,131 @@ requests, not just read through:**
   trusting a retest's result, don't just trust that a `pkill`-by-name
   succeeded.
 
+## `database.json` dead-data cleanup — done, 2026-09-22
+
+Closes item 1 from the previous backlog (the 2026-09-17 finding that
+`database.json` carried every type ever registered for the store, not just
+what's actually on the page — confirmed still true after the `componentID`
+migration, just with stale type-keyed *and* componentID-keyed entries mixed
+in).
+
+**Root cause, confirmed by reading `ejs-generator.mjs`:** `generateEjs()`
+built `mergedContent` by starting from `{ ...content }` — the store's
+**entire** content registry (every type ever declared in `acme.json`,
+whether or not it's on this page) — stripped `items` off any `dataSource`
+entry in that full set, then merged componentID-keyed leaf data on top via
+`collectLeafData()`. So the file was always a superset: real page data
+layered onto a copy of the whole registry, never filtered down.
+
+**Fix — collapsed into one recursive collector, and stopped starting from
+the full registry at all:**
+- `collectLeafData()` → renamed `collectUsedData()` (written by the user,
+  reviewed line-by-line before running), now handles both cases in one
+  pass instead of two separate mechanisms:
+  ```js
+  function collectUsedData(node, content, out) {
+    const rawContent = content[node.type];
+    if (!rawContent || typeof rawContent !== "object") return;
+    if (rawContent.dataSource) {
+      out[node.type] = { ...rawContent, items: undefined };
+    } else if (rawContent.template) {
+      out[node.componentID] = { ...rawContent, ...node };
+    }
+    (node.components ?? []).forEach((child) =>
+      collectUsedData(child, content, out),
+    );
+  }
+  ```
+  A type with neither `dataSource` nor `template` (a pure `isContainer`
+  wrapper like `layout-comp`/`header-layout`) intentionally adds nothing of
+  its own — it renders no content itself, only its children do — but
+  recursion still walks into it, so anything nested inside still gets
+  collected under its own key.
+- `generateEjs()` now builds `usedContent` from an **empty object**,
+  populated only by walking `data.components` through `collectUsedData()`
+  — no more `{ ...content }` starting point. The full `content` registry is
+  still passed, unfiltered, to `buildCssLinks()` and
+  `generatorComponentsEjs()` (they genuinely need every type available
+  during generation, e.g. `content[childType].template` for a dynamic
+  container's child) — only the object actually written to
+  `${storeID}.database.json` is filtered.
+- **No `childType` special-casing needed for this filter** (unlike the
+  existing `buildCssLinks`/`collectUsedTypes` gotcha in `page-renderer.mjs`,
+  which does need it) — the generated `.ejs` loop for a dynamic container
+  references the loop's own `item` variable (`database.content['item'].field`
+  is never emitted; it's a local var name inside the `forEach`), not
+  `database.content[childType]`, so the child type's own entry was never
+  needed in `database.json` at all.
+
+**Verified end-to-end, exactly the test the user proposed before writing
+any code:** deleted `acme.database.json` and `acme.home.save.json`,
+reopened `?store=acme&pageSlug=home` (fresh empty canvas, confirmed via
+`GET /api/load` 404 same as any first-time page), rebuilt the page by hand
+(including deliberately re-testing `layout-comp` nesting and a fresh
+9-card `pricing-cards`), clicked Publish, then inspected the regenerated
+`acme.database.json` directly: exactly 18 keys, every one traceable to a
+real node in the freshly rebuilt `acme.home.save.json` (cross-checked by
+walking both trees) — no leftover entries from before the delete, and none
+of the store's types that genuinely weren't on the page this time
+(`footer`, `layout-slot`, `header-layout` itself) appear in the file.
+Confirms the file is now rebuilt from the real page tree on every Publish,
+not merged onto old disk state — same "full rebuild, not incremental
+merge" behavior the `.ejs` file already had, now applied consistently to
+`database.json` too.
+
+Also cleaned up as part of this session's wrap-up: `backend/tmp-dump-database.mjs`,
+`backend/tmp-ejs-test.mjs`, `backend/tmp-render-ejs.mjs` deleted (throwaway
+scripts flagged as "not committed, growing stale" since 2026-09-16/17/19 —
+finally removed). Backend restarted without `--watch` for testing, per the
+project's established habit of never trusting a live-data claim without
+hitting the real running server by hand.
+
 **Next session:**
-1. Filter `database.json` down to the current page's actually-used types
-   (dead-data finding from 2026-09-17) — still open, not touched this
-   session; the `componentID` migration makes this slightly different now
-   (need to filter by which *instances* are actually on the page, not just
-   which *types*, since the file now also carries stale type-keyed base
-   entries alongside the new componentID-keyed ones).
-2. Decide whether/how to migrate `beta.json`'s `pricing-cards` to
+1. Decide whether/how to migrate `beta.json`'s `pricing-cards` to
    `dataSource` (deferred repeatedly, still not done).
-3. Revisit per-store vs. per-page `database.json` granularity once a second
+2. Revisit per-store vs. per-page `database.json` granularity once a second
    page actually exists.
-4. Race condition on concurrent saves (last-write-wins) — still open,
+3. Race condition on concurrent saves (last-write-wins) — still open,
    pre-launch blocker, unchanged from prior sessions.
-5. Clean up: `tmp-ejs-test.mjs`, `tmp-dump-database.mjs`, `tmp-render-ejs.mjs`,
-   `tmp-server.log` in `backend/` — still not deleted, growing stale.
+
+## `database.json` → per-page `page-data.json`, readable `componentID` — 2026-09-25
+
+Closes the "per-store vs. per-page `database.json`" item tracked since
+2026-09-16 (the collision risk: two pages with their own `hero` would have
+shared one `database.content['hero']` key / one file, last Publish wins).
+Plan doc was `page-data-rename-plan.md`; user wrote all the code, Claude
+reviewed each diff before it was run.
+
+- **File is now per page:** `backend/data/{storeId}.{pageSlug}.page-data.json`
+  (was `{storeId}.database.json`), same granularity as `{storeId}.{pageSlug}.ejs`
+  and `*.save.json`. Written by `generateEjs()` in `ejs-generator.mjs`
+  (`dataPath`), read by `GET /store-ejs/:storeId/:pageSlug` in `server.mjs`.
+  Still a full rebuild on every Publish (only the types actually on the page,
+  see the 2026-09-22 cleanup) — not merged onto old disk state.
+- **EJS variable renamed `database` → `pageData`** everywhere: the dynamic
+  container `forEach` loop and the leaf `adapter()` prefix in
+  `generatorComponentsEjs`, and `ejs.renderFile(ejsPath, { pageData })` in the
+  route. Generated `.ejs` files reference `pageData.content[...]`, so **any
+  `.ejs` generated before this change throws `ReferenceError` until that page is
+  re-Published** (route passes only `pageData` now).
+- **`componentID` is now readable:** `${type}-${crypto.randomUUID().slice(0, 8)}`
+  (e.g. `hero-a1b2c3d4`) instead of a bare UUID. Set in `themed-block.js`
+  `init()` (bake-once guard unchanged) **and** in `App.jsx`'s
+  `component:clone` handler — the two formats must stay identical (duplicated
+  on purpose: `themed-block.js` is loaded via Blob URL and can't import from
+  `src/`). Old-format UUID ids in existing saves keep working, they're just
+  not self-descriptive; no migration.
+- **Verified end to end:** fresh `home` Publish → `acme.home.page-data.json`
+  with `header-…`/`hero-…`/`newsletter-…` keys, generated `.ejs` has 0
+  `database` references, `/store-ejs/acme/home` = 200. Then created an `about`
+  page with its own `hero`, Publish → separate `acme.about.page-data.json`
+  (its own `hero-…` key), `home`'s file untouched (mtime unchanged), both
+  routes 200. Live `dataSource` items still resolve per request.
+- **Ops note again:** after a "restart", confirm with `netstat -ano | grep :3001`
+  that exactly one process listens — a stale old backend silently serves old code.
+
+**Next session:**
+1. Decide whether/how to migrate `beta.json`'s `pricing-cards` to `dataSource`
+   (deferred repeatedly).
+2. Race condition on concurrent saves (last-write-wins) — still open,
+   pre-launch blocker; lock per `(storeId, pageSlug)`.

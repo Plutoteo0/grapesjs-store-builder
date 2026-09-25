@@ -52,7 +52,7 @@ async function generatorComponentsEjs(node, content, depth = 0) {
     );
     const childHtml = wrapWithTag(childWrapper, { classes: [] }, childTemplate);
 
-    const loopEjs = `<% (database.content['${node.type}'].items || []).forEach(function(item) { %>${childHtml}<% }); %>`;
+    const loopEjs = `<% (pageData.content['${node.type}'].items || []).forEach(function(item) { %>${childHtml}<% }); %>`;
 
     return wrapWithTag(wrapper, node, loopEjs);
   }
@@ -77,7 +77,7 @@ async function generatorComponentsEjs(node, content, depth = 0) {
       : adapter(
           rawContent.template,
           rawContent.richTextFields ?? [],
-          `database.content['${node.componentID}']`,
+          `pageData.content['${node.componentID}']`,
         );
   return wrapWithTag(wrapper, node, leaf);
 }
@@ -91,8 +91,13 @@ export async function generateEjs(storeID, pageSlug) {
     collectUsedData(child, content, usedContent),
   );
 
-  const dbPath = join(__dirname, "..", "data", `${storeID}.database.json`);
-  await writeFile(dbPath, JSON.stringify({ content: usedContent }, null, 2));
+  const dataPath = join(
+    __dirname,
+    "..",
+    "data",
+    `${storeID}.${pageSlug}.page-data.json`,
+  );
+  await writeFile(dataPath, JSON.stringify({ content: usedContent }, null, 2));
 
   const links = (await buildCssLinks(storeID, data)).join("\n");
 
